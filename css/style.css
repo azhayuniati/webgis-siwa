@@ -4600,17 +4600,26 @@ h4,
 }
 
 @media (max-width: 768px) {
+  /* paksa layout foto+teks jadi 1 kolom di mobile */
+  #tentang [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+  #tentang [style*="aspect-ratio: 4 / 5"] {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
   /* kasih tinggi kotak balik dikit khusus di HP, biar foto candi kelihatan */
   #tentang [style*="aspect-ratio: 4 / 5"] {
     aspect-ratio: 3 / 4 !important;
   }
-
   /* perkecil badge UNESCO supaya nggak dominan nutupin foto */
   #tentang [style*="rgba(235, 232, 219, 0.88)"] {
     padding: 8px 12px !important;
     bottom: 12px !important;
     left: 12px !important;
-    right: 12px !important;
+    right: auto !important;
+    width: auto !important;
+    max-width: 65% !important;
   }
   #tentang [style*="rgba(235, 232, 219, 0.88)"] div[style*="font-size: 10px"] {
     font-size: 8px !important;
@@ -4618,16 +4627,33 @@ h4,
   #tentang [style*="rgba(235, 232, 219, 0.88)"] div[style*="font-size: 14px"] {
     font-size: 11px !important;
   }
-}
-
-@media (max-width: 768px) {
   #relief [style*="column-count"] {
     column-count: 1 !important;
   }
   #relief [style*="columns:"] {
     columns: 1 !important;
   }
+  #relief [style*="PASTE_STYLE_STRING_DI_SINI"] {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+  .leaflet-popup-content-wrapper {
+    max-width: 190px !important;
+  }
+  .leaflet-popup-content {
+    margin: 10px 12px !important;
+  }
+  .leaflet-popup-content h4,
+  .leaflet-popup-content .h4 {
+    font-size: 16px !important;
+    letter-spacing: -0.5px !important;
+  }
+  .leaflet-popup-content .label,
+  .leaflet-popup-content .label-small {
+    font-size: 9px !important;
+  }
 }
+
 /* ganti warna footer jadi coklat (berlaku semua ukuran layar) */
 footer[style*="background: var(--yellow)"] {
   background: var(--acc-4) !important;
