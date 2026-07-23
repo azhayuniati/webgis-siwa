@@ -4561,6 +4561,7 @@ h4,
 #peta [style*="grid-template-columns: 1fr 260px"] > div:nth-child(2) > div:nth-child(3) {
   display: none !important;
 }
+
 /* TAMBAHKAN di akhir style.css — perbaikan tampilan mobile */
 @media (max-width: 768px) {
   /* 1 & 2. Peta Kawasan: peta + sidebar jadi 1 kolom, tab jadi wrap */
@@ -4595,5 +4596,50 @@ h4,
   /* 6 & 7. Section Relief: grid 4 kolom (Nama Resmi & Statistik) jadi 2 kolom */
   #relief [style*="grid-template-columns: repeat(4, 1fr)"] {
     grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* kasih tinggi kotak balik dikit khusus di HP, biar foto candi kelihatan */
+  #tentang [style*="aspect-ratio: 4 / 5"] {
+    aspect-ratio: 3 / 4 !important;
+  }
+
+  /* perkecil badge UNESCO supaya nggak dominan nutupin foto */
+  #tentang [style*="rgba(235, 232, 219, 0.88)"] {
+    padding: 8px 12px !important;
+    bottom: 12px !important;
+    left: 12px !important;
+    right: 12px !important;
+  }
+  #tentang [style*="rgba(235, 232, 219, 0.88)"] div[style*="font-size: 10px"] {
+    font-size: 8px !important;
+  }
+  #tentang [style*="rgba(235, 232, 219, 0.88)"] div[style*="font-size: 14px"] {
+    font-size: 11px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  #relief [style*="column-count"] {
+    column-count: 1 !important;
+  }
+  #relief [style*="columns:"] {
+    columns: 1 !important;
+  }
+}
+/* ganti warna footer jadi coklat (berlaku semua ukuran layar) */
+footer[style*="background: var(--yellow)"] {
+  background: var(--acc-4) !important;
+}
+footer[style*="background: var(--yellow)"] *:not(.btn-primary):not(.btn-primary *) {
+  color: var(--bg-1) !important;
+}
+
+@media (max-width: 900px) {
+  /* grid 4 kolom footer jadi 1 kolom di HP */
+  footer [style*="grid-template-columns: 1.6fr 1fr 1fr 1.2fr"] {
+    grid-template-columns: 1fr !important;
+    gap: 32px !important;
   }
 }
