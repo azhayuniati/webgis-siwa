@@ -4561,3 +4561,39 @@ h4,
 #peta [style*="grid-template-columns: 1fr 260px"] > div:nth-child(2) > div:nth-child(3) {
   display: none !important;
 }
+/* TAMBAHKAN di akhir style.css — perbaikan tampilan mobile */
+@media (max-width: 768px) {
+  /* 1 & 2. Peta Kawasan: peta + sidebar jadi 1 kolom, tab jadi wrap */
+  #peta [style*="grid-template-columns: 1fr 260px"] {
+    grid-template-columns: 1fr !important;
+  }
+  #peta [style*="align-self: flex-end"] {
+    align-self: flex-start !important;
+    width: 100% !important;
+  }
+  .tabs-wrap {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* 3. Section Data: 8 kartu sensor jadi 2 kolom */
+  #data [style*="grid-template-columns: repeat(4, 1fr)"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* 4. Section Tour: 3 kartu fitur jadi 1 kolom */
+  #tour [style*="grid-template-columns: repeat(3, 1fr)"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 5 & 6b. Section Relief: teks 2 kolom (Bab I & Arsitektur/Relief) jadi 1 kolom */
+  #relief [style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 6 & 7. Section Relief: grid 4 kolom (Nama Resmi & Statistik) jadi 2 kolom */
+  #relief [style*="grid-template-columns: repeat(4, 1fr)"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
