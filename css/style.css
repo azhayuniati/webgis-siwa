@@ -4644,24 +4644,26 @@ h4,
   }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] {
     min-width: 0 !important;
-    max-width: 150px !important;
-    padding: 8px 10px !important;
-    bottom: 20px !important;
+    max-width: 130px !important;
+    padding: 6px 8px !important;
+    bottom: 16px !important;
+    border-radius: 6px !important;
   }
-  /* label kecil "CANDI UTAMA · 47 M" */
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(1) {
-    font-size: 7px !important;
-    margin-bottom: 3px !important;
-  }
-  /* judul "Candi Siwa" */
-  #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(2) {
-    font-size: 13px !important;
+    font-size: 6px !important;
     margin-bottom: 2px !important;
   }
-  /* teks "VIRTUAL TOUR TERSEDIA" */
+  #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(2) {
+    font-size: 11px !important;
+    margin-bottom: 1px !important;
+  }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(3) {
-    font-size: 7px !important;
-    margin-top: 3px !important;
+    font-size: 6px !important;
+    margin-top: 2px !important;
+  }
+  #tour svg[aria-label="Denah Aerial Kompleks Prambanan"] {
+    transform: scale(1.3);
+    transform-origin: center center;
   }
 }
 
