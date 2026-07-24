@@ -4644,17 +4644,17 @@ h4,
   }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] {
     min-width: 0 !important;
-    max-width: 130px !important;
-    padding: 6px 8px !important;
+    max-width: 105px !important;
+    padding: 5px 7px !important;
     bottom: 16px !important;
-    border-radius: 6px !important;
+    border-radius: 5px !important;
   }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(1) {
     font-size: 6px !important;
     margin-bottom: 2px !important;
   }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(2) {
-    font-size: 11px !important;
+    font-size: 9px !important;
     margin-bottom: 1px !important;
   }
   #tour [style*="min-width: 220px"][style*="max-width: 280px"] > div:nth-child(3) {
