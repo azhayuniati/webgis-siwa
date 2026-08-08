@@ -1,0 +1,1643 @@
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
+
+// Patch THREE prototypes — enables BVH on any BufferGeometry/Mesh
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+// ── DOM refs ─────────────────────────────────────────────────────
+const canvas = document.getElementById("c");
+const barFill = document.getElementById("barFill");
+const barTxt = document.getElementById("barTxt");
+const stageTxt = document.getElementById("stageTxt");
+const loadSc = document.getElementById("loadScreen");
+const errBox = document.getElementById("errBox");
+const entrySc = document.getElementById("entryScreen");
+const xhair = document.getElementById("xhair");
+const lockMsg = document.getElementById("lockMsg");
+const btnSV = document.getElementById("btnSV");
+const btnOrb = document.getElementById("btnOrbit");
+const posTxt = document.getElementById("posTxt");
+const perfNote = document.getElementById("perfNote");
+const fpsEl = document.getElementById("fpsBox");
+const poiLayer = document.getElementById("poiLayer");
+const poiPrompt = document.getElementById("poiPrompt");
+const poiModal = document.getElementById("poiModal");
+const poiClose = document.getElementById("poiClose");
+const poiImgEl = document.getElementById("poiImg");
+const poiImgFrame = document.getElementById("poiImgFrame");
+const poiDirEl = document.getElementById("poiDir");
+const poiTitleEl = document.getElementById("poiTitle");
+const poiDescEl = document.getElementById("poiDesc");
+const poiAudioEl = document.getElementById("poiAudio");
+const poiAudioBtn = document.getElementById("poiAudioBtn");
+const poiAudioIcon = document.getElementById("poiAudioIcon");
+const poiAudioLabel = document.getElementById("poiAudioLabel");
+let currentLang = "id";
+const I18N = {
+  id: {
+    loadSubtitle: "Virtual Heritage · Prambanan",
+    loadInit: "Menginisialisasi...",
+    loadModel: "Memuat model...",
+    stageScaling: "⚙ Scaling...",
+    stageBVH: "⚙ Membangun BVH (pohon collision)...",
+    stageChunks: "⚙ Membangun chunk visual...",
+    loadError: "Error!",
+    entryTitle: "CANDI SIWA",
+    entrySubtitle: "PRAMBANAN · ABAD IX MASEHI",
+    entryNote: "Klik canvas untuk mengunci mouse · ESC untuk keluar",
+    entryButton: "MASUK VIRTUAL TOUR",
+    topbarTitle: "Candi Siwa Prambanan",
+    topbarLocation: "Kompleks Prambanan, Jawa Tengah",
+    topbarEra: "Abad IX M",
+    btnSV: "Street View",
+    btnOrbit: "Orbit",
+    lockMsg: "Klik canvas untuk mengunci mouse",
+    infoTitle: "CANDI SIWA",
+    infoLoc: "Kompleks Prambanan, DIY",
+    rowHeight: "Tinggi Asli",
+    rowBuilt: "Dibangun",
+    rowStyle: "Gaya",
+    rowMaterial: "Material",
+    rowReligion: "Agama",
+    hintWalk: "Berjalan",
+    hintLook: "Melihat",
+    hintRun: "Berlari",
+    hintJump: "Lompat",
+    hintInfo: "Info titik terdekat",
+    hintExit: "Keluar mode",
+    poiPromptTxt: "Lihat informasi",
+    poiImgEmpty: "🖼 Gambar arca belum tersedia",
+  },
+  en: {
+    loadSubtitle: "Virtual Heritage · Prambanan",
+    loadInit: "Initializing...",
+    loadModel: "Loading model...",
+    stageScaling: "⚙ Scaling...",
+    stageBVH: "⚙ Building BVH (collision tree)...",
+    stageChunks: "⚙ Building visual chunks...",
+    loadError: "Error!",
+    entryTitle: "CANDI SIWA",
+    entrySubtitle: "PRAMBANAN · 9TH CENTURY CE",
+    entryNote: "Click canvas to lock mouse · ESC to exit",
+    entryButton: "ENTER VIRTUAL TOUR",
+    topbarTitle: "Siwa Temple, Prambanan",
+    topbarLocation: "Prambanan Complex, Central Java",
+    topbarEra: "9th Century CE",
+    btnSV: "Street View",
+    btnOrbit: "Orbit",
+    lockMsg: "Click canvas to lock mouse",
+    infoTitle: "SIWA TEMPLE",
+    infoLoc: "Prambanan Complex, DIY",
+    rowHeight: "Original Height",
+    rowBuilt: "Built",
+    rowStyle: "Style",
+    rowMaterial: "Material",
+    rowReligion: "Religion",
+    hintWalk: "Walk",
+    hintLook: "Look",
+    hintRun: "Run",
+    hintJump: "Jump",
+    hintInfo: "Nearest point info",
+    hintExit: "Exit mode",
+    poiPromptTxt: "View information",
+    poiImgEmpty: "🖼 Statue image not yet available",
+  },
+};
+
+function applyLanguage(lang) {
+  currentLang = lang;
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n;
+    if (I18N[lang][key] !== undefined) el.textContent = I18N[lang][key];
+  });
+  document.querySelectorAll(".langBtn").forEach((b) => b.classList.toggle("active", b.dataset.lang === lang));
+  poiImgFrame.dataset.emptyText = I18N[lang].poiImgEmpty;
+  localStorage.setItem("candiSiwaLang", lang);
+  refreshDotLabels();
+  if (poiOpen && activePOIRef) refreshPOIText(activePOIRef);
+}
+
+// ── RENDERER ─────────────────────────────────────────────────────
+// antialias OFF for performance; we re-enable only in orbit mode
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: false, // OFF during street-view → big GPU saving
+  powerPreference: "high-performance",
+  stencil: false,
+  depth: true,
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+
+// ── SCENE ────────────────────────────────────────────────────────
+const SKY = new THREE.Color(0x87ceeb);
+const scene = new THREE.Scene();
+scene.background = SKY;
+// Fog near/far = camera near clip for visible geometry
+// IMPORTANT: fog.far must match fpsCam.far so GPU discards geometry beyond fog
+const FOG_NEAR_SV = 8;
+const FOG_FAR_SV = 18; // tight fog when inside candi — hides far geometry
+const FOG_NEAR_ORBIT = 30;
+const FOG_FAR_ORBIT = 120;
+scene.fog = new THREE.Fog(SKY, FOG_NEAR_ORBIT, FOG_FAR_ORBIT);
+
+// ── LIGHTS ───────────────────────────────────────────────────────
+// Pencahayaan siang hari tropis — matahari kuat dari sudut, langit biru hangat
+scene.add(new THREE.AmbientLight(0xfff0d0, 1.7)); // dinaikkan dari 0.9 → isi bayangan
+const sun = new THREE.DirectionalLight(0xffe8b0, 2.4); // sinar matahari kuning-emas (sedikit diturunkan biar tak overexpose)
+sun.position.set(50, 80, 30);
+scene.add(sun);
+// Lampu isian kedua dari arah berlawanan matahari — meniru bounce
+// cahaya langit/tanah, supaya sisi candi yang tidak kena sinar
+// langsung tidak jatuh ke hitam total
+const fill = new THREE.DirectionalLight(0xcfe0ff, 0.8);
+fill.position.set(-40, 40, -30);
+scene.add(fill);
+// Langit biru sebagai fill light, tanah hijau sebagai bounce light
+scene.add(new THREE.HemisphereLight(0xb8d4f0, 0x6b8c4a, 1.1));
+
+// ── GROUND ───────────────────────────────────────────────────────
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+const plaza = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshLambertMaterial({ color: 0x9e8f78 }));
+plaza.rotation.x = -Math.PI / 2;
+plaza.position.y = 0.005;
+scene.add(plaza);
+
+// ── CAMERAS ──────────────────────────────────────────────────────
+const orbitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 300);
+orbitCam.position.set(8, 5, 12);
+
+// fpsCam.far MUST equal FOG_FAR_SV so WebGL depth-clips geometry beyond fog
+const fpsCam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, FOG_FAR_SV);
+scene.add(fpsCam);
+
+let activeCamera = orbitCam;
+let isSV = false,
+  locked = false;
+
+// ── ORBIT CONTROL ────────────────────────────────────────────────
+const orb = { theta: -0.8, phi: 1.0, r: 12, tx: 0, ty: 2, tz: 0, drag: false, lx: 0, ly: 0 };
+function updateOrbit() {
+  orbitCam.position.set(orb.tx + orb.r * Math.sin(orb.phi) * Math.sin(orb.theta), orb.ty + orb.r * Math.cos(orb.phi), orb.tz + orb.r * Math.sin(orb.phi) * Math.cos(orb.theta));
+  orbitCam.lookAt(orb.tx, orb.ty, orb.tz);
+}
+updateOrbit();
+
+canvas.addEventListener("mousedown", (e) => {
+  if (!isSV) {
+    orb.drag = true;
+    orb.lx = e.clientX;
+    orb.ly = e.clientY;
+  }
+});
+window.addEventListener("mouseup", () => (orb.drag = false));
+window.addEventListener("mousemove", (e) => {
+  if (!orb.drag || isSV) return;
+  orb.theta -= (e.clientX - orb.lx) * 0.005;
+  orb.phi = Math.max(0.05, Math.min(Math.PI / 2 - 0.01, orb.phi + (e.clientY - orb.ly) * 0.005));
+  orb.lx = e.clientX;
+  orb.ly = e.clientY;
+  updateOrbit();
+});
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    if (isSV) return;
+    orb.r = Math.max(2, Math.min(80, orb.r + e.deltaY * 0.015));
+    updateOrbit();
+  },
+  { passive: true },
+);
+
+// ── PLAYER ───────────────────────────────────────────────────────
+// ── SPAWN DEFAULT: gerbang TIMUR (lihat screenshot referensi) ─────
+// Isi 2 nilai ini dari hasil kalibrasi tombol "1" (lihat langkah di bawah)
+const SPAWN_POS = new THREE.Vector3(2.734, 0.135, -0.046); // ganti x/z sesuai hasil kalibrasi
+const SPAWN_YAW = 1.57; // ganti sesuai hasil kalibrasi
+
+const P = {
+  pos: SPAWN_POS.clone(),
+  vel: new THREE.Vector3(),
+  yaw: SPAWN_YAW,
+  pitch: 0,
+  onGround: false,
+  jumpRequested: false,
+  eyeH: 0.13,
+  radius: 0.02,
+  maxStepH: 0.08,
+  walkSpd: 0.5,
+  runSpd: 1.0,
+  gravity: 1.8,
+  jumpVel: 0.5,
+  bobPhase: 0,
+  bobY: 0,
+};
+// ── POINTS OF INTEREST (4 arca pada bilik candi) ────────────────
+// Koordinat dalam satuan model (1 unit ≈ 10 m, sama seperti P.pos).
+// ⚠️ pos di bawah PLACEHOLDER — wajib dikalibrasi, lihat instruksi di bawah.
+// ── (DEV) KALIBRASI KOORDINAT LOKAL ──────────────────────────────
+// 1) Berdiri TEPAT di ambang tangga/pintu masuk sisi TIMUR (gerbang utama),
+//    tekan "1"  → jadi ORIGIN.
+// 2) Jalan LURUS masuk ke pusat candi (di bawah menara utama),
+//    tekan "2"  → jadi arah FORWARD (menentukan sumbu kanan/depan).
+// 3) Jalan ke tiap stupa, tekan tombol berikut lalu BACA CONSOLE (F12):
+//    "3"=Mahadewa  "4"=Agastya  "5"=Ganesha  "6"=Durga
+let _calOrigin = null,
+  _calForward = null;
+
+function _calFrame() {
+  if (!_calOrigin || !_calForward) return null;
+  const fwd = _calForward.clone().sub(_calOrigin);
+  fwd.y = 0;
+  fwd.normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  return { fwd, right };
+}
+
+document.addEventListener("keydown", (e) => {
+  if (!isSV) return;
+  if (e.code === "Digit1") {
+    _calOrigin = P.pos.clone();
+    console.log(`✅ ORIGIN (gerbang timur): pos=(${P.pos.x.toFixed(3)}, ${P.pos.y.toFixed(3)}, ${P.pos.z.toFixed(3)})  yaw=${P.yaw.toFixed(3)}`);
+  }
+  if (e.code === "Digit2") {
+    _calForward = P.pos.clone();
+    console.log("✅ FORWARD (arah pusat):", _calForward);
+  }
+
+  const names = { Digit3: "mahadewa", Digit4: "agastya", Digit5: "ganesha", Digit6: "durga" };
+  if (names[e.code]) {
+    const f = _calFrame();
+    if (!f) {
+      console.warn("⚠️ Set origin (1) & forward (2) dulu.");
+      return;
+    }
+    const rel = P.pos.clone().sub(_calOrigin);
+    console.log(`📍 ${names[e.code]} → local: right=${rel.dot(f.right).toFixed(3)} forward=${rel.dot(f.fwd).toFixed(3)} up=${rel.y.toFixed(3)}`);
+  }
+});
+
+// Isi 2 nilai ini dari hasil tombol "1" dan "2" di atas (hardcode setelah kalibrasi)
+const CANDI_ORIGIN = new THREE.Vector3(0, 0, 0); // ← ganti dgn hasil ORIGIN
+const CANDI_FORWARD = new THREE.Vector3(0, 0, -1); // ← ganti dgn hasil FORWARD
+
+function localToWorld(local) {
+  const fwd = CANDI_FORWARD.clone().sub(CANDI_ORIGIN);
+  fwd.y = 0;
+  fwd.normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  return CANDI_ORIGIN.clone()
+    .addScaledVector(right, local.right)
+    .addScaledVector(fwd, local.forward)
+    .add(new THREE.Vector3(0, local.up, 0));
+}
+
+const POIS = [
+  {
+    id: "mahadewa",
+    name: { id: "Siwa Mahadewa", en: "Shiva Mahadewa" },
+    dir: { id: "Timur", en: "East" },
+    pos: new THREE.Vector3(-0.051, 0.999, -0.039),
+    radius: 0.35,
+    img: "./assets/poi/siwa.jpg",
+    audio: {
+      id: "./assets/audio/mahadewa_id.mp3",
+      en: "./assets/audio/mahadewa_en.mp3",
+    },
+    desc: {
+      id: "Tempat bersemayamnya Arca Siwa Mahadewa yang memiliki laksana atau atribut Siwa, yaitu tengkorak di atas bulan sabit yang biasa disebut candrakapala, mahkota keagungan (jatamakuta), dan mata ketiga (trinetra) pada bagian dahi.",
+      en: "The chamber housing the Shiva Mahadewa statue, shown with Shiva's attributes: a skull above a crescent moon known as the candrakapala, a crown of glory (jatamakuta), and a third eye (trinetra) on the forehead.",
+    },
+  },
+  {
+    id: "agastya",
+    name: { id: "Agastya", en: "Agastya" },
+    dir: { id: "Selatan", en: "South" },
+    pos: new THREE.Vector3(-0.038, 0.934, 0.605),
+    radius: 0.35,
+    img: "./assets/poi/siwa.jpg",
+    audio: {
+      id: "./assets/audio/agastya_id.mp3",
+      en: "./assets/audio/agastya_en.mp3",
+    },
+    desc: {
+      id: "Agastya merupakan perwujudan Dewa Siwa yang digambarkan berasal dari perbatasan Cina dan merupakan seorang musafir. Wajah Arca Agastya mirip dengan wajah orang Mongol, yaitu memiliki kumis dan jenggot panjang serta raut wajah yang teduh dan bijaksana. Tangan kanan Agastya membentuk sikap tubuh seperti Buddha yang melambangkan pengajaran tentang kebenaran. Di pundaknya terdapat penyapu lalat yang digunakan untuk memercikkan air suci. Di bagian kanan terdapat trisula yang melambangkan Trimurti (Brahma, Siwa, Wisnu).",
+      en: "Agastya is a manifestation of Shiva, depicted as a wandering sage said to originate from the China border region. His face resembles Mongol features, with a long moustache and beard and a calm, wise expression. His right hand forms a Buddha-like gesture symbolizing the teaching of truth. A fly-whisk rests on his shoulder, used to sprinkle holy water, and a trident on his right represents the Trimurti (Brahma, Shiva, Vishnu).",
+    },
+  },
+  {
+    id: "ganesha",
+    name: { id: "Ganesha", en: "Ganesha" },
+    dir: { id: "Barat", en: "West" },
+    pos: new THREE.Vector3(-0.672, 0.947, -0.005),
+    radius: 0.35,
+    img: "./assets/poi/ganesha.jpg",
+    audio: {
+      id: "./assets/audio/ganesha_id.mp3",
+      en: "./assets/audio/ganesha_en.mp3",
+    },
+    desc: {
+      id: "Tangan kiri Ganesha selalu memegang mangkuk yang berisi ilmu pengetahuan. Belalainya selalu masuk ke dalam mangkuk tersebut, yang berarti ia menyerap ilmu pengetahuan yang ada. Tangan kanannya memegang patahan gading kanannya yang ia patahkan sendiri untuk menulis, demi mengajarkan ilmu pengetahuan kepada manusia.",
+      en: "Ganesha's left hand always holds a bowl containing knowledge. His trunk is always inserted into the bowl, symbolizing his absorption of knowledge. His right hand holds a broken tusk he broke off himself to write, in order to teach knowledge to humanity.",
+    },
+  },
+  {
+    id: "durga",
+    name: { id: "Durga Mahisasuramardini", en: "Durga Mahisasuramardini" },
+    dir: { id: "Utara", en: "North" },
+    pos: new THREE.Vector3(-0.035, 0.939, -0.614),
+    radius: 0.35,
+    img: "./assets/poi/durga.jpg",
+    audio: {
+      id: "./assets/audio/durga_id.mp3",
+      en: "./assets/audio/durga_en.mp3",
+    },
+    desc: {
+      id: "Durga digambarkan memiliki delapan tangan, salah satunya memegang cakra (Asura). Raksasa Asura melambangkan egoisme manusia; untuk menaklukkan ego tersebut, Tuhan menganugerahkan senjata berupa cakra. Setiap manusia dipercaya memiliki tujuh cakra, dan baik-buruknya bergantung pada bagaimana manusia mengendalikan cakra-cakra tersebut. Arca Durga adalah satu-satunya arca perempuan yang terdapat di candi ini, dan masyarakat meyakini bahwa arca inilah sosok Roro Jonggrang.",
+      en: "Durga is depicted with eight arms, one of which holds a discus (Asura). The Asura represents human egoism; to conquer this ego, God grants the weapon of the discus. Every person is believed to have seven chakras, and their well-being depends on how they control these chakras. The Durga statue is the only female deity in this temple, and the local people believe it represents the figure of Roro Jonggrang.",
+    },
+  },
+  {
+    id: "panel_1a",
+    name: "Panel Relief 1",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(1.427, 0.444, 0.459),
+    radius: 0.35,
+    img: "./assets/poi/panel_1a.jpg",
+    desc: "Dewa Wisnu di Surga Tushita, duduk di atas singgasana berbentuk ular naga yang muncul dari laut, dan dibelakangnya duduk seekor garuda. Lima orang dewa meminta bantuan Wisnu supaya turun ke dunia untuk membinasakan kejahatan yang dilakukan oleh Rawana.",
+  },
+  {
+    id: "panel_1b",
+    name: "Panel Relief 1",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(1.432, 0.436, 0.672),
+    radius: 0.35,
+    img: "./assets/poi/panel_1b.jpg",
+    desc: "Di Kerajaan Ayodya, memerintahlah raja Dasarata. Raja Dasarata dan permaisuri sedang dihadap oleh Rama, penjelmaan Wisnu, besera para abdi kraton.",
+  },
+  {
+    id: "panel_2",
+    name: "Panel Relief 2",
+    dir: "Adegan",
+    pos: new THREE.Vector3(1.255, 0.449, 0.8),
+    radius: 0.35,
+    img: "./assets/poi/panel_2.jpg",
+    desc: "Pada suatu hari Raja Dasarata kedatangan tamu pendeta bernama Wismamitra. Dia memohon pertolongan kepada Rama agar mau membunuh para raksasa yang mengganggu pertapaannya. Di belakang sang raja duduk tiga istrinya, yaitu Kausalya, yang telah melahirkan Rama (putra pertama), Kaikeyi, yang telah melahirkan Barata, dan Sumitra, yang putranya bernama Laksamana dan Satrugna. Rama dan Laksamana berada di sebelah kanan mereka.",
+  },
+  {
+    id: "panel_3",
+    name: "Panel Relief 3",
+    dir: "Adegan",
+    pos: new THREE.Vector3(1.096, 0.448, 0.972),
+    radius: 0.35,
+    img: "./assets/poi/panel_3.jpg",
+    desc: "Rama dan Laksamana dalam perjalanan menuju pertapaan pendeta Wismamitra. Tiba-tiba mereka diganggu oleh raseksi Tataka. Rama membunuh dia di hutan.",
+  },
+  {
+    id: "panel_4a",
+    name: "Panel Relief 4",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.972, 0.444, 1.117),
+    radius: 0.35,
+    img: "./assets/poi/panel_4a.jpg",
+    desc: "Pendeta Wismamitra duduk bersemadi di dalam pertapaannya.",
+  },
+  {
+    id: "panel_4b",
+    name: "Panel Relief 4",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.893, 0.44, 1.118),
+    radius: 0.35,
+    img: "./assets/poi/panel_4b.jpg",
+    desc: "Rama dan Laksamana membunuh semua raksasa yang mengganggu pertapaan Wismamitra.",
+  },
+  {
+    id: "panel_5a",
+    name: "Panel Relief 5",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.782, 0.448, 1.227),
+    radius: 0.35,
+    img: "./assets/poi/panel_5a.jpg",
+    desc: "Di kerajaan Mantilireja, memerintah Raja Janaka. Beliau mengadakan sayembara: barangsiapa dapat menarik dan mematahkan busur Prabu Janaka akan dikawinkan dengan putrinya yang sangat cantik bernama Sinta.",
+  },
+  {
+    id: "panel_5b",
+    name: "Panel Relief 5",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.787, 0.439, 1.318),
+    radius: 0.35,
+    img: "./assets/poi/panel_5b.jpg",
+    desc: "Rama ikut ambil bagian sayembara dan berhasil menarik serta mematahkan busur Prabu Janaka, disaksikan oleh Sinta dan para pengawalnya.",
+  },
+  {
+    id: "panel_6a",
+    name: "Panel Relief 6",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.694, 0.442, 1.454),
+    radius: 0.35,
+    img: "./assets/poi/panel_6a.jpg",
+    desc: "Rama, Sinta, beserta Laksamana dalam perjalanan menuju negeri Ayodya.",
+  },
+  {
+    id: "panel_6b",
+    name: "Panel Relief 6",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.584, 0.448, 1.456),
+    radius: 0.35,
+    img: "./assets/poi/panel_6b.jpg",
+    desc: "Di dalam perjalanan tersebut mereka bertemu dengan seorang tokoh yang bernama Rama Parasu. Dia meminta kepada Rama agar membunuhnya dengan panah.",
+  },
+  {
+    id: "panel_6c",
+    name: "Panel Relief 6",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(0.447, 0.447, 1.452),
+    radius: 0.35,
+    img: "./assets/poi/panel_6c.jpg",
+    desc: "Rama membunuh Rama Parasu dengan panahnya.",
+  },
+  {
+    id: "panel_6d",
+    name: "Panel Relief 6",
+    dir: "Adegan 4",
+    pos: new THREE.Vector3(0.319, 0.449, 1.451),
+    radius: 0.35,
+    img: "./assets/poi/panel_6d.jpg",
+    desc: "Raja Dasarata, karena merasa telah lanjut usia, ingin mewariskan tahta kerajaan kepada Rama. Raja dan permaisurinya serta para pembantunya sedang mempersiapkan pesta penobatan.",
+  },
+  {
+    id: "panel_7a",
+    name: "Panel Relief 7",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(-0.381, 0.446, 1.455),
+    radius: 0.35,
+    img: "./assets/poi/panel_7a.jpg",
+    desc: "Penobatan Rama sebagai putra mahkota dilakukan oleh seorang pendeta. Di luar istana rakyat merayakan penobatan tersebut.",
+  },
+  {
+    id: "panel_7b",
+    name: "Panel Relief 7",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(-0.574, 0.448, 1.461),
+    radius: 0.35,
+    img: "./assets/poi/panel_7b.jpg",
+    desc: "Istri kedua Kaikeyi, ibu Barata, membujuk sang Raja untuk membatalkan penobatan Rama sebagai raja, mengasingkannya ke dalam hutan selama empat belas tahun, dan mengangkat Barata sebagai penggantinya. Malam hari sebelum keberangkatan mereka, Rama dan Sinta berdoa di dalam candi.",
+  },
+  {
+    id: "panel_7c",
+    name: "Panel Relief 7",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(-0.696, 0.449, 1.458),
+    radius: 0.35,
+    img: "./assets/poi/panel_7c.jpg",
+    desc: "Rama, Sinta, dan Laksamana pergi menuju hutan untuk menjalani pembuangan.",
+  },
+  {
+    id: "panel_8",
+    name: "Panel Relief 8",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-0.842, 0.456, 1.284),
+    radius: 0.35,
+    img: "./assets/poi/panel_8.jpg",
+    desc: "Tidak lama kemudian, raja Dasarata wafat karena dukacita; jenazahnya diperabukan. Para brahmana dan permaisuri Kausalya membagi-bagikan dana kepada rakyat Ayodya.",
+  },
+  {
+    id: "panel_9",
+    name: "Panel Relief 9",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-0.995, 0.453, 1.134),
+    radius: 0.35,
+    img: "./assets/poi/panel_9.jpg",
+    desc: "Barata menolak untuk dinobatkan sebagai raja; dia pergi mencari Rama di hutan untuk membujuknya pulang ke istana dan memerintah kerajaan Ayodya. Akan tetapi Rama menolaknya dan memberikan sandal sebagai gantinya. Sandal tersebut agar ditaruh di atas singgasana, dan menyuruh Barata agar memerintah Ayodya atas nama Rama.",
+  },
+  {
+    id: "panel_10",
+    name: "Panel Relief 10",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-1.155, 0.45, 0.983),
+    radius: 0.35,
+    img: "./assets/poi/panel_10.jpg",
+    desc: "Sinta diganggu oleh dua raksasa, tetapi kedua raksasa tersebut berhasil dibunuh oleh Rama.",
+  },
+  {
+    id: "panel_11",
+    name: "Panel Relief 11",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-1.327, 0.453, 0.82),
+    radius: 0.35,
+    img: "./assets/poi/panel_11.jpg",
+    desc: "Rama, Sinta, dan Laksamana tinggal di dalam gubuk. Pada suatu hari seekor burung gagak mencuri daging rusa yang sedang dijemur oleh Sinta. Rama membunuh burung gagak tersebut dengan memenggal kepalanya.",
+  },
+  {
+    id: "panel_12a",
+    name: "Panel Relief 12",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(-1.502, 0.447, 0.676),
+    radius: 0.35,
+    img: "./assets/poi/panel_12a.jpg",
+    desc: "Raseksi Sarpakenaka, adik perempuan Rawana, yang menyamar sebagai wanita cantik, memberikan sesuatu kepada Rama dengan maksud agar Rama mau memperistrinya. Akan tetapi, Rama menolaknya dan menunjuk pada Laksamana.",
+  },
+  {
+    id: "panel_12b",
+    name: "Panel Relief 12",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(-1.5, 0.449, 0.52),
+    radius: 0.35,
+    img: "./assets/poi/panel_12b.jpg",
+    desc: "Cinta Sarpakenaka juga ditolak oleh Laksamana; dengan maksud untuk mengusirnya Laksamana memotong daun telinga dan hidungnya. Kemudian, dia mengadu kepada saudaranya, Rawana, tentang penghinaan tersebut.",
+  },
+  {
+    id: "panel_12c",
+    name: "Panel Relief 12",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(-1.494, 0.449, 0.369),
+    radius: 0.35,
+    img: "./assets/poi/panel_12c.jpg",
+    desc: "Sinta dijaga oleh Laksamana sewaktu Rama sedang memanah seekor kijang jelmaan Marica, raksasa pembantu Rawana.",
+  },
+  {
+    id: "panel_13a",
+    name: "Panel Relief 13",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(-1.491, 0.436, -0.31),
+    radius: 0.35,
+    img: "./assets/poi/panel_13a.jpg",
+    desc: "Sinta berada di dalam gubuk seorang diri setelah Laksamana pergi mencari Rama atas perintahnya.",
+  },
+  {
+    id: "panel_13b",
+    name: "Panel Relief 13",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(-1.491, 0.443, -0.374),
+    radius: 0.35,
+    img: "./assets/poi/panel_13b.jpg",
+    desc: "Rawana yang menyamar sebagai pendeta mendekati Sinta untuk meminta nasi. Ketika Sinta memberikan nasi, tangannya ditarik dengan paksa oleh Rawana.",
+  },
+  {
+    id: "panel_13c",
+    name: "Panel Relief 13",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(-1.494, 0.442, -0.471),
+    radius: 0.35,
+    img: "./assets/poi/panel_13c.jpg",
+    desc: "Rawana berhasil menculik Sinta dan membawanya terbang ke angkasa. Di tengah perjalanan Rawana diserang Jatayu untuk membebaskan Sinta. Jatayu kalah dalam pertempuran, tetapi dia berhasil menerima cincin Sinta.",
+  },
+  {
+    id: "panel_13d",
+    name: "Panel Relief 13",
+    dir: "Adegan 4",
+    pos: new THREE.Vector3(-1.496, 0.447, -0.572),
+    radius: 0.35,
+    img: "./assets/poi/panel_13d.jpg",
+    desc: "Rama dan Laksamana sangat sedih ketika mengetahui hilangnya Sinta, dan memutuskan mencarinya. Di dalam pengembaraannya mereka berjumpa dengan Jatayu yang hampir menemui ajalnya. Dia menceritakan apa yang telah terjadi, dan setelah memberi cincin kepada Rama, dia meninggal dunia.",
+  },
+  {
+    id: "panel_13e",
+    name: "Panel Relief 13",
+    dir: "Adegan 5",
+    pos: new THREE.Vector3(-1.497, 0.447, -0.667),
+    radius: 0.35,
+    img: "./assets/poi/panel_13e.jpg",
+    desc: "Rama dan Laksamana bertempur melawan raksasa Kabandha. Mereka berhasil mengalahkannya dan mengembalikannya kepada wujudnya yang semula. Kabandha adalah inkarnasi dewa yang dikutuk oleh dewa Siwa dan dihukum untuk hidup sebagai makhluk yang jelek.",
+  },
+  {
+    id: "panel_14",
+    name: "Panel Relief 14",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-1.323, 0.446, -0.812),
+    radius: 0.35,
+    img: "./assets/poi/panel_14.jpg",
+    desc: "Rama dan Laksamana bertemu dengan seekor buaya yang sebenarnya inkarnasi seorang bidadari yang terkena kutukan oleh dewa. Setelah terkena panah Rama, dia berubah ke dalam wujudnya yang semula dan terbang ke surga.",
+  },
+  {
+    id: "panel_15",
+    name: "Panel Relief 15",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-1.174, 0.448, -0.985),
+    radius: 0.35,
+    img: "./assets/poi/panel_15.jpg",
+    desc: "Rama dan Laksamana bertemu dengan Hanoman, seekor kera putih. Dia memohon kepada mereka untuk menemui Sugriwa, raja kera.",
+  },
+  {
+    id: "panel_16a",
+    name: "Panel Relief 16a",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(-1.068, 0.44, -1.132),
+    radius: 0.35,
+    img: "./assets/poi/panel_16a.jpg",
+    desc: "Rama dan Laksamana beristirahat di tengah hutan. Rama menyuruh adiknya untuk mencari air.",
+  },
+  {
+    id: "panel_16b",
+    name: "Panel Relief 16b",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(-1.002, 0.447, -1.13),
+    radius: 0.35,
+    img: "./assets/poi/panel_16b.jpg",
+    desc: "Laksamana menemukan air yang menetes dari atas pohon. Akan tetapi, rasanya asin; kemudian, diketahui bahwa air tersebut air mata raja kera Sugriwa yang menangis karena terjepit.",
+  },
+  {
+    id: "panel_16c",
+    name: "Panel Relief 16c",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(-0.935, 0.447, -1.132),
+    radius: 0.35,
+    img: "./assets/poi/panel_16c.jpg",
+    desc: "Setelah dibantu oleh Rama dan Laksamana turun dari pohon, Sugriwa minta kepada Rama untuk membantu dia menaklukkan Subali yang telah merebut kerajaan dan istrinya dengan paksa. Pada giliran berikutnya Sugriwa akan membantu Rama untuk mendapatkan kembali Sinta dari Alengka.",
+  },
+  {
+    id: "panel_17",
+    name: "Panel Relief 17",
+    dir: "Adegan",
+    pos: new THREE.Vector3(-0.864, 0.442, -1.299),
+    radius: 0.35,
+    img: "./assets/poi/panel_17.jpg",
+    desc: "Untuk meyakinkan Sugriwa atas kesaktian Rama, Rama memanah dengan sebatang anak panah yang dapat memotonng tujuh pohon palem.",
+  },
+  {
+    id: "panel_18a",
+    name: "Panel Relief 18",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(-0.717, 0.446, -1.46),
+    radius: 0.35,
+    img: "./assets/poi/panel_18a.jpg",
+    desc: "Setiba Rama, Laksamana, dan Sugriwa di Kiskenda, mereka menyusun strategi untuk menyerang Subali. Rama menyuruh Sugriwa untuk menantang Subali.",
+  },
+  {
+    id: "panel_18b",
+    name: "Panel Relief 18",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(-0.61, 0.44, -1.465),
+    radius: 0.35,
+    img: "./assets/poi/panel_18b.jpg",
+    desc: "Terjadi perang sangat seru antara Subali dan Sugriwa. Rama memanah Subali; Subali mati terbunuh.",
+  },
+  {
+    id: "panel_18c",
+    name: "Panel Relief 18",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(-0.429, 0.442, -1.466),
+    radius: 0.35,
+    img: "./assets/poi/panel_18c.jpg",
+    desc: "Sugriwa kembali naik tahta Kiskenda, dan Anggada anak Subali diangkat sebagai putra mahkota. Sugriwa disambut oleh para kera.",
+  },
+  {
+    id: "panel_19a",
+    name: "Panel Relief 19",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.25, 0.445, -1.472),
+    radius: 0.35,
+    img: "./assets/poi/panel_19a.jpg",
+    desc: "Rama, Laksamana, dan Sugriwa dalam perjalanan ke suatu tempat perundingan.",
+  },
+  {
+    id: "panel_19b",
+    name: "Panel Relief 19",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.357, 0.441, -1.476),
+    radius: 0.35,
+    img: "./assets/poi/panel_19b.jpg",
+    desc: "Rama, Laksamana, dan Sugriwa sedang berunding untuk merencanakan dan mengatur siasat dalam rangka penyerangan ke Alengka.",
+  },
+  {
+    id: "panel_19c",
+    name: "Panel Relief 19",
+    dir: "Adegan 3",
+    pos: new THREE.Vector3(0.491, 0.437, -1.471),
+    radius: 0.35,
+    img: "./assets/poi/panel_19c.jpg",
+    desc: "Sugriwa mengusulkan kepada Rama agar mau mengirim utusan, yaitu Hanoman, untuk mencari Sinta di Alengka.",
+  },
+  {
+    id: "panel_19d",
+    name: "Panel Relief 19",
+    dir: "Adegan 4",
+    pos: new THREE.Vector3(0.586, 0.446, -1.47),
+    radius: 0.35,
+    img: "./assets/poi/panel_19d.jpg",
+    desc: "Hanoman pergi ke Alengka dengan jalan melompat dari gunung Mahameru untuk menyeberangi laut. Sesampainya di Alengka, dia mengamati situasi istana Rawana dan mencari dari atas atap tempat Sinta tinggal.",
+  },
+  {
+    id: "panel_20a",
+    name: "Panel Relief 20",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.764, 0.445, -1.35),
+    radius: 0.35,
+    img: "./assets/poi/panel_20a.jpg",
+    desc: "Hanoman berada di dalam istana Rawana, tempat Sinta disekap. Dia mengintip Sinta dari atas pohon; Sinta sedang duduk di taman ditemani oleh Trijata, keponakan Rawana. Seorang dayang menemukan dia dan melaporkan bahwa ada seekor kera bersembunyi di taman.",
+  },
+  {
+    id: "panel_20b",
+    name: "Panel Relief 20",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.768, 0.444, -1.261),
+    radius: 0.35,
+    img: "./assets/poi/panel_20b.jpg",
+    desc: "Hanoman menghadap Sinta dan memberitahukan tujuan kedatangannya dan bahwa Rama akan segera datang untuk menjemput Sinta pulang.",
+  },
+  {
+    id: "panel_21a",
+    name: "Panel Relief 21",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(0.885, 0.446, -1.152),
+    radius: 0.35,
+    img: "./assets/poi/panel_21a.jpg",
+    desc: "Kedatangan Hanoman diketahui oleh para pengawal kerajaan Alengka, dan dia ditangkap. Dia diikat dengan tali dan ekornya dibakar.",
+  },
+  {
+    id: "panel_21b",
+    name: "Panel Relief 21",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(0.967, 0.443, -1.148),
+    radius: 0.35,
+    img: "./assets/poi/panel_21b.jpg",
+    desc: "Akan tetapi, Hanoman dapat melepaskan diri. Dengan ekornya terbakar, dia melompat ke atas atap yang satu ke atap lainnya sambil membakarnya. Dalam waktu sekejap saja seluruh kota Alengka terbakar.",
+  },
+  {
+    id: "panel_22",
+    name: "Panel Relief 22",
+    dir: "Adegan",
+    pos: new THREE.Vector3(1.091, 0.451, -0.969),
+    radius: 0.35,
+    img: "./assets/poi/panel_22.jpg",
+    desc: "Hanoman kembali ke Kiskenda, diterima oleh Rama, Laksamana, dan Sugriwa. Hanoman melaporkan kepada mereka tugasnya di Alengka.",
+  },
+  {
+    id: "panel_23",
+    name: "Panel Relief 23",
+    dir: "Adegan",
+    pos: new THREE.Vector3(1.249, 0.447, -0.836),
+    radius: 0.35,
+    img: "./assets/poi/panel_23.jpg",
+    desc: "Rama akan mengeringkan laut untuk jalan menuju Alengka. Dewa laut merasa takut; kemudian, ia memohon kepada Rama agar membatalkan niatnya tersebut dan menyarankan kepadanya untuk membuat jembatan dari pantai ke Alengka.",
+  },
+  {
+    id: "panel_24a",
+    name: "Panel Relief 24",
+    dir: "Adegan 1",
+    pos: new THREE.Vector3(1.415, 0.446, -0.646),
+    radius: 0.35,
+    img: "./assets/poi/panel_24a.jpg",
+    desc: "Rama, Laksamana, dan Sugriwa menyaksikan para kera sedang membuat jembatan, dibantu oleh ikan dan dewa laut.",
+  },
+  {
+    id: "panel_24b",
+    name: "Panel Relief 24",
+    dir: "Adegan 2",
+    pos: new THREE.Vector3(1.416, 0.446, -0.459),
+    radius: 0.35,
+    img: "./assets/poi/panel_24b.jpg",
+    desc: "Rama, Laksamana, Sugriwa, dan bala tentara kera sedang melewati jembatan menuju Alengka.",
+  },
+];
+
+let poiOpen = false,
+  activePOI = null;
+const poiDots = new Map();
+
+POIS.forEach((p) => {
+  const dot = document.createElement("div");
+  dot.className = "poiDot";
+  dot.addEventListener("click", (e) => {
+    e.stopPropagation(); // cegah klik ini juga memicu request pointer lock di canvas
+    if (isSV && !poiOpen) openPOI(p);
+  });
+  const label = document.createElement("div");
+  label.className = "poiLabel";
+  label.textContent = p.name[currentLang];
+  dot.appendChild(label);
+  poiLayer.appendChild(dot);
+  poiDots.set(p.id, dot);
+});
+
+const _poiProj = new THREE.Vector3(),
+  _poiVec = new THREE.Vector3();
+
+function updatePOIs() {
+  if (!isSV) {
+    poiLayer.style.display = "none";
+    poiPrompt.classList.add("hidden");
+    return;
+  }
+  poiLayer.style.display = "";
+  let nearest = null,
+    nearestDist = Infinity;
+
+  for (const p of POIS) {
+    const dot = poiDots.get(p.id);
+    _poiProj.copy(p.pos).project(fpsCam);
+    _poiVec.copy(p.pos).sub(P.pos);
+    const dist = _poiVec.length(); // tetap dipakai utk fade/visibility dot
+    const distXZ = Math.hypot(_poiVec.x, _poiVec.z); // ← BARU: jarak horizontal saja, abaikan Y
+    const visible = _poiProj.z < 1 && _poiProj.x >= -1.15 && _poiProj.x <= 1.15 && _poiProj.y >= -1.15 && _poiProj.y <= 1.15 && dist < 12;
+
+    if (visible) {
+      dot.style.display = "block";
+      dot.style.left = (_poiProj.x * 0.5 + 0.5) * innerWidth + "px";
+      dot.style.top = (1 - (_poiProj.y * 0.5 + 0.5)) * innerHeight + "px";
+      dot.style.opacity = Math.max(0.25, 1 - dist / 12);
+      dot.classList.toggle("near", distXZ < p.radius); // ← pakai distXZ
+    } else dot.style.display = "none";
+
+    if (distXZ < p.radius && distXZ < nearestDist) {
+      nearest = p;
+      nearestDist = distXZ;
+    }
+  }
+  activePOI = nearest;
+  poiPrompt.classList.toggle("hidden", !nearest || poiOpen);
+}
+
+let activePOIRef = null;
+
+function refreshPOIText(p) {
+  poiDirEl.textContent = p.dir[currentLang];
+  poiTitleEl.textContent = p.name[currentLang];
+  poiDescEl.textContent = p.desc[currentLang];
+  poiImgEl.alt = p.name[currentLang];
+
+  if (!poiAudioEl || !poiAudioBtn) return; // fitur audio opsional — jangan sampai bikin fitur lain ikut rusak
+  poiAudioEl.pause();
+  poiAudioEl.currentTime = 0;
+  const src = p.audio && p.audio[currentLang];
+  if (src) {
+    poiAudioEl.src = src;
+    poiAudioBtn.style.display = "";
+    poiAudioIcon.textContent = "▶";
+    poiAudioLabel.textContent = currentLang === "id" ? "Dengarkan" : "Listen";
+  } else {
+    poiAudioEl.removeAttribute("src");
+    poiAudioBtn.style.display = "none";
+  }
+}
+
+function refreshDotLabels() {
+  POIS.forEach((p) => {
+    const dot = poiDots.get(p.id);
+    const label = dot.querySelector(".poiLabel");
+    if (label) label.textContent = p.name[currentLang];
+  });
+}
+
+function openPOI(p) {
+  poiOpen = true;
+  activePOIRef = p;
+  refreshPOIText(p);
+  poiImgFrame.classList.remove("empty");
+  poiImgEl.onerror = () => poiImgFrame.classList.add("empty");
+  poiImgEl.src = p.img;
+  poiModal.classList.remove("hidden");
+  poiPrompt.classList.add("hidden");
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+}
+function closePOI() {
+  poiOpen = false;
+  activePOIRef = null;
+  poiModal.classList.add("hidden");
+  if (poiAudioEl) poiAudioEl.pause();
+  if (isSV) safeRequestPointerLock();
+}
+poiClose.addEventListener("click", closePOI);
+poiModal.addEventListener("click", (e) => {
+  if (e.target === poiModal) closePOI();
+});
+
+document.querySelectorAll(".langBtn").forEach((btn) => {
+  btn.addEventListener("click", () => applyLanguage(btn.dataset.lang));
+});
+
+if (poiAudioBtn && poiAudioEl) {
+  poiAudioBtn.addEventListener("click", () => {
+    if (poiAudioEl.paused) poiAudioEl.play().catch((err) => console.warn("Gagal memutar audio:", err));
+    else poiAudioEl.pause();
+  });
+  poiAudioEl.addEventListener("play", () => {
+    poiAudioIcon.textContent = "⏸";
+    poiAudioLabel.textContent = currentLang === "id" ? "Jeda" : "Pause";
+  });
+  poiAudioEl.addEventListener("pause", () => {
+    poiAudioIcon.textContent = "▶";
+    poiAudioLabel.textContent = currentLang === "id" ? "Dengarkan" : "Listen";
+  });
+  poiAudioEl.addEventListener("ended", () => {
+    poiAudioIcon.textContent = "▶";
+    poiAudioLabel.textContent = currentLang === "id" ? "Dengarkan" : "Listen";
+  });
+} else {
+  console.warn("Elemen audio POI tidak ditemukan — cek id #poiAudio dan #poiAudioBtn di index.html.");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.code === "KeyL" && isSV) {
+    console.log(`POI coord → x: ${P.pos.x.toFixed(3)}, y: ${P.pos.y.toFixed(3)}, z: ${P.pos.z.toFixed(3)}`);
+  }
+});
+
+let lastUnlockTime = 0;
+function safeRequestPointerLock() {
+  const cooldown = 1300; // ms, sedikit di atas batas cooldown browser
+  const elapsed = performance.now() - lastUnlockTime;
+  const doRequest = () => {
+    canvas.requestPointerLock().catch((err) => {
+      console.warn("Pointer lock ditunda/gagal:", err.message || err);
+    });
+  };
+  if (elapsed < cooldown) setTimeout(doRequest, cooldown - elapsed);
+  else doRequest();
+}
+
+// ── POINTER LOCK ─────────────────────────────────────────────────
+canvas.addEventListener("click", () => {
+  if (isSV && !locked) {
+    safeRequestPointerLock(); // ← ganti dari canvas.requestPointerLock()
+  } else if (isSV && locked && activePOI && !poiOpen) {
+    openPOI(activePOI);
+  }
+});
+document.addEventListener("pointerlockchange", () => {
+  const wasLocked = locked;
+  locked = document.pointerLockElement === canvas;
+  if (wasLocked && !locked) lastUnlockTime = performance.now();
+  lockMsg.style.display = isSV && !locked ? "block" : "none";
+  xhair.style.display = isSV && locked ? "block" : "none";
+});
+document.addEventListener("mousemove", (e) => {
+  if (!locked || !isSV) return;
+  P.yaw -= e.movementX * 0.0018;
+  P.pitch = Math.max(-1.3, Math.min(1.3, P.pitch - e.movementY * 0.0018));
+});
+
+// ── KEYBOARD ─────────────────────────────────────────────────────
+const K = {};
+document.addEventListener("keydown", (e) => {
+  K[e.code] = true;
+  if (e.code === "Escape") {
+    if (poiOpen) closePOI();
+    else if (isSV) exitSV();
+  }
+  if (e.code === "KeyE" && isSV && activePOI && !poiOpen) openPOI(activePOI);
+  if (e.code === "Space" && isSV) P.jumpRequested = true;
+  if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault();
+});
+document.addEventListener("keyup", (e) => (K[e.code] = false));
+
+// ── MODE SWITCH ──────────────────────────────────────────────────
+function enterSV() {
+  isSV = true;
+  P.pos.copy(SPAWN_POS);
+  P.yaw = SPAWN_YAW;
+  P.pitch = 0;
+  P.vel.set(0, 0, 0);
+  P.onGround = false;
+  activeCamera = fpsCam;
+  btnSV.classList.add("active");
+  btnOrb.classList.remove("active");
+  lockMsg.style.display = "block";
+  entrySc.classList.add("hidden");
+  document.getElementById("hints").style.display = "";
+  // Street-view render settings: lower pixel ratio + tight fog = fewer fragments
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.0));
+  scene.fog.near = FOG_NEAR_SV;
+  scene.fog.far = FOG_FAR_SV;
+  fpsCam.far = FOG_FAR_SV;
+  fpsCam.updateProjectionMatrix();
+}
+function exitSV() {
+  if (poiOpen) closePOI();
+  isSV = false;
+  activeCamera = orbitCam;
+  locked = false;
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  btnOrb.classList.add("active");
+  btnSV.classList.remove("active");
+  xhair.style.display = "none";
+  lockMsg.style.display = "none";
+  // Restore full quality for orbit view
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  scene.fog.near = FOG_NEAR_ORBIT;
+  scene.fog.far = FOG_FAR_ORBIT;
+  fpsCam.far = FOG_FAR_ORBIT;
+  fpsCam.updateProjectionMatrix();
+}
+btnSV.addEventListener("click", enterSV);
+btnOrb.addEventListener("click", exitSV);
+document.getElementById("enterBtn").addEventListener("click", enterSV);
+
+// ── BVH COLLISION ────────────────────────────────────────────────
+// One invisible mesh with BVH — O(log N) raycast instead of O(N)
+let bvhMesh = null; // set after model loads
+
+let _frame = 0;
+
+// ── Dedicated raycasters
+const gRay = new THREE.Raycaster();
+gRay.firstHitOnly = true;
+const stpRay = new THREE.Raycaster();
+stpRay.firstHitOnly = true;
+const wRayX = new THREE.Raycaster();
+wRayX.firstHitOnly = true;
+const wRayZ = new THREE.Raycaster();
+wRayZ.firstHitOnly = true;
+const poiPickRay = new THREE.Raycaster();
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "KeyK" || !isSV) return;
+
+  if (!bvhMesh) {
+    showCalibToast("Model/BVH belum selesai dimuat — tunggu sebentar lalu coba lagi.");
+    return;
+  }
+
+  poiPickRay.setFromCamera(new THREE.Vector2(0, 0), fpsCam); // arah persis crosshair
+  const hit = poiPickRay.intersectObject(bvhMesh, false);
+  if (hit.length) {
+    const pt = hit[0].point;
+    const msg = `x:${pt.x.toFixed(3)} y:${pt.y.toFixed(3)} z:${pt.z.toFixed(3)}`;
+    console.log(msg);
+    showCalibToast(msg);
+  } else {
+    console.warn("Tidak kena permukaan — arahkan crosshair ke arca lalu tekan K lagi.");
+    showCalibToast("Tidak kena permukaan — arahkan crosshair ke bagian candi.");
+  }
+});
+
+// Toast kecil supaya feedback kalibrasi kelihatan tanpa buka DevTools
+let _toastTimer = null;
+function showCalibToast(text) {
+  let el = document.getElementById("calibToast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "calibToast";
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+}
+const _DN = new THREE.Vector3(0, -1, 0);
+const _PX = new THREE.Vector3(1, 0, 0),
+  _NX = new THREE.Vector3(-1, 0, 0);
+const _PZ = new THREE.Vector3(0, 0, 1),
+  _NZ = new THREE.Vector3(0, 0, -1);
+const _ro = new THREE.Vector3();
+const _ro2 = new THREE.Vector3();
+
+// Ground probe — starts from ABOVE maxStepH so it can detect the next stair tread.
+// Far is generous enough to see the current surface AND one step down.
+function groundY(pos) {
+  // Cast origin: curFloor + maxStepH + small margin  =  pos.y - eyeH + maxStepH + 0.05
+  _ro.set(pos.x, pos.y - P.eyeH + P.maxStepH + 0.05, pos.z);
+  gRay.set(_ro, _DN);
+  // Far: reach from (curFloor+maxStepH) down past (curFloor - maxStepH - buffer)
+  gRay.far = P.maxStepH * 2 + P.eyeH + 0.2;
+  if (bvhMesh) {
+    const h = gRay.intersectObject(bvhMesh, false);
+    if (h.length) return h[0].point.y;
+  }
+  const h2 = gRay.intersectObjects([ground, plaza], false);
+  return h2.length ? h2[0].point.y : null;
+}
+
+// Wall probe — only 2 heights: just above stair riser + eye level.
+// NO top-of-head probe so low archways / door lintels don't block the player.
+function wallBlocked(pos, mx, mz) {
+  if (!bvhMesh) return { bx: false, bz: false };
+  const heights = [
+    pos.y - P.eyeH + P.maxStepH + 0.01, // just above max stair riser
+    pos.y, // eye / chest level
+  ];
+  let bx = false,
+    bz = false;
+  for (const hy of heights) {
+    _ro.set(pos.x, hy, pos.z);
+    if (!bx && mx !== 0) {
+      wRayX.set(_ro, mx > 0 ? _PX : _NX);
+      wRayX.far = P.radius + 0.012;
+      if (wRayX.intersectObject(bvhMesh, false).length) bx = true;
+    }
+    if (!bz && mz !== 0) {
+      wRayZ.set(_ro, mz > 0 ? _PZ : _NZ);
+      wRayZ.far = P.radius + 0.012;
+      if (wRayZ.intersectObject(bvhMesh, false).length) bz = true;
+    }
+    if (bx && bz) break;
+  }
+  return { bx, bz };
+}
+
+// ── PLAYER UPDATE ────────────────────────────────────────────────
+const _f = new THREE.Vector3(),
+  _r = new THREE.Vector3(),
+  _mv = new THREE.Vector3();
+function updatePlayer(dt) {
+  if (!isSV || poiOpen) return;
+  _frame++;
+  dt = Math.min(dt, 0.05);
+  const spd = K.ShiftLeft || K.ShiftRight ? P.runSpd : P.walkSpd;
+  _mv.set(0, 0, 0);
+  if (K.KeyW || K.ArrowUp) {
+    _f.set(Math.sin(P.yaw), 0, Math.cos(P.yaw));
+    _mv.addScaledVector(_f, -spd * dt);
+  }
+  if (K.KeyS || K.ArrowDown) {
+    _f.set(Math.sin(P.yaw), 0, Math.cos(P.yaw));
+    _mv.addScaledVector(_f, spd * dt);
+  }
+  if (K.KeyA || K.ArrowLeft) {
+    _r.set(Math.cos(P.yaw), 0, -Math.sin(P.yaw));
+    _mv.addScaledVector(_r, -spd * dt);
+  }
+  if (K.KeyD || K.ArrowRight) {
+    _r.set(Math.cos(P.yaw), 0, -Math.sin(P.yaw));
+    _mv.addScaledVector(_r, spd * dt);
+  }
+
+  // ── Horizontal movement + wall collision
+  if (_mv.lengthSq() > 0) {
+    const { bx, bz } = wallBlocked(P.pos, _mv.x, _mv.z);
+    if (!bx) P.pos.x += _mv.x;
+    if (!bz) P.pos.z += _mv.z;
+  }
+
+  // ── Gravity (only when airborne)
+  if (!P.onGround) P.vel.y -= P.gravity * dt;
+  P.vel.y = Math.max(P.vel.y, -8.0);
+  P.pos.y += P.vel.y * dt;
+
+  // ── Ground resolution — always reset first, re-enable only if truly touching surface.
+  // Threshold kept tiny (0.002) so a freshly-jumped player (pos.y rises ~0.008/frame)
+  // escapes the snap zone immediately and gravity takes over.
+  P.onGround = false;
+  const fy = groundY(P.pos);
+  if (fy !== null && P.pos.y <= fy + P.eyeH + 0.002) {
+    P.pos.y = fy + P.eyeH;
+    P.vel.y = 0;
+    P.onGround = true;
+  } else if (P.pos.y < -5) {
+    P.pos.set(3, P.eyeH, 3);
+    P.vel.y = 0;
+    P.onGround = true;
+  }
+
+  // ── Jump — applied AFTER ground resolution.
+  // Also nudge pos.y up so the snap condition (threshold 0.002) cannot re-capture
+  // the player in the very same frame the jump is triggered.
+  if (P.jumpRequested) {
+    P.jumpRequested = false;
+    if (P.onGround) {
+      P.vel.y = P.jumpVel;
+      P.pos.y += 0.01; // push clear of snap zone immediately
+      P.onGround = false;
+    }
+  }
+
+  // ── Head-bob while walking on ground
+  const moving = _mv.lengthSq() > 0 && P.onGround;
+  const bobRate = K.ShiftLeft || K.ShiftRight ? 12 : 6;
+  if (moving) {
+    P.bobPhase = (P.bobPhase + bobRate * dt) % (Math.PI * 2);
+    P.bobY = Math.sin(P.bobPhase) * 0.004;
+  } else {
+    P.bobY *= 0.8;
+  }
+
+  P.pos.x = Math.max(-50, Math.min(50, P.pos.x));
+  P.pos.z = Math.max(-50, Math.min(50, P.pos.z));
+  fpsCam.position.copy(P.pos);
+  fpsCam.position.y += P.bobY;
+  fpsCam.rotation.order = "YXZ";
+  fpsCam.rotation.y = P.yaw;
+  fpsCam.rotation.x = P.pitch;
+}
+
+// ── MINIMAP ──────────────────────────────────────────────────────
+const mmCtx = document.getElementById("mm").getContext("2d");
+const MM = 290;
+
+const MM_BG = "#c9c397";
+const MM_PLAN = "#a7a37c";
+const MM_ROOM = "#d8d3ab"; // ← pastikan baris ini ada
+const MM_OUTLINE = "#2a2119";
+const MM_DOT = "#1a1410";
+const MM_MARKER = "#c62828";
+
+// Setengah-jangkauan tampilan minimap, satuan dunia (1 unit = 10 m).
+const VIEW_HALF = 2.9;
+const MARKER_MAX_R = MM / 2 - 14; // batas jarak penanda pemain dari pusat, biar tidak hilang keluar kotak
+
+// Setengah-lebar denah (unit dunia). Naikkan/turunkan kalau ukuran
+// terasa kurang pas.
+const FW = 2.5;
+
+// Satu "lengan" denah (dari puncak Selatan ke puncak Barat), dilacak
+// LANGSUNG dari piksel gambar referensi yang kamu kirim — bukan
+// tebakan tangan lagi — lalu dinormalisasi ke rentang -1..1.
+// Kenapa cuma satu lengan: pada gambar referensi sisi Utara & Timur
+// terpotong crop, sedangkan sisi Selatan & Barat utuh — jadi lengan
+// inilah yang paling akurat, lalu digandakan 4x via rotasi 90° supaya
+// hasil akhirnya PASTI simetris sempurna (tidak ada sisi yang menceng).
+const _planQuad = [
+  [0, 0.982],
+  [-0.126, 0.964],
+  [-0.135, 0.874],
+  [-0.198, 0.838],
+  [-0.207, 0.793],
+  [-0.441, 0.793],
+  [-0.459, 0.775],
+  [-0.468, 0.64],
+  [-0.649, 0.64],
+  [-0.667, 0.613],
+  [-0.667, 0.468],
+  [-0.802, 0.441],
+  [-0.811, 0.18],
+  [-0.865, 0.171],
+  [-0.874, 0.117],
+  [-0.982, 0.108],
+  [-1, 0],
+];
+function _rot90([x, y]) {
+  return [-y, x];
+}
+const PLAN_PTS = [];
+let _q = _planQuad;
+for (let i = 0; i < 4; i++) {
+  PLAN_PTS.push(..._q.map(([x, y]) => [x * FW, y * FW]));
+  _q = _q.map(_rot90);
+}
+
+// ── Ruang arca (kamar) + koridor penghubung ──
+const ROOM_HALF = FW * 0.13; // ukuran ruang arca
+const CORR_HALF = FW * 0.1; // setengah-lebar koridor
+const CENTER_HALF = FW * 0.16; // setengah-ukuran ruang tengah
+
+function _rectPts(cx, cz, half) {
+  return [
+    [cx - half, cz - half],
+    [cx + half, cz - half],
+    [cx + half, cz + half],
+    [cx - half, cz + half],
+  ];
+}
+const _centerSq = _rectPts(0, 0, CENTER_HALF);
+
+// Arah mata angin murni — supaya koridor & kamar SELALU lurus sejajar
+// sumbu (tidak ikut miring oleh selisih kecil posisi arca asli).
+const DIR_AXIS = {
+  Utara: [0, -1],
+  North: [0, -1],
+  Selatan: [0, 1],
+  South: [0, 1],
+  Barat: [-1, 0],
+  West: [-1, 0],
+  Timur: [1, 0],
+  East: [1, 0],
+};
+
+const STATUE_IDS = ["durga", "ganesha", "agastya", "mahadewa"];
+let ROOMS_CACHE = null,
+  CORRIDORS_CACHE = null,
+  DOTS_CACHE = null;
+
+function buildStatueLayout() {
+  if (ROOMS_CACHE) return; // hitung sekali saja, lalu simpan di cache
+  ROOMS_CACHE = [];
+  CORRIDORS_CACHE = [];
+  DOTS_CACHE = [];
+  STATUE_IDS.forEach((id) => {
+    const poi = POIS.find((p) => p.id === id);
+    if (!poi) return;
+    const x = poi.pos.x,
+      z = poi.pos.z;
+    const rawDist = Math.hypot(x, z);
+    if (rawDist < CENTER_HALF * 1.3) {
+      DOTS_CACHE.push([0, 0]); // Mahadewa — di ruang tengah
+      return;
+    }
+    const [ux, uz] = DIR_AXIS[poi.dir.id] || DIR_AXIS[poi.dir.en] || [x / rawDist, z / rawDist];
+    const dist = x * ux + z * uz;
+    const rx = ux * dist,
+      rz = uz * dist;
+    DOTS_CACHE.push([rx, rz]);
+    ROOMS_CACHE.push(_rectPts(rx, rz, ROOM_HALF));
+    const x0 = ux * CENTER_HALF,
+      z0 = uz * CENTER_HALF;
+    const x1 = rx - ux * ROOM_HALF,
+      z1 = rz - uz * ROOM_HALF;
+    const nx = -uz * CORR_HALF,
+      nz = ux * CORR_HALF;
+    CORRIDORS_CACHE.push([
+      [x0 + nx, z0 + nz],
+      [x1 + nx, z1 + nz],
+      [x1 - nx, z1 - nz],
+      [x0 - nx, z0 - nz],
+    ]);
+  });
+}
+
+function drawMinimap() {
+  mmCtx.fillStyle = MM_BG;
+  mmCtx.fillRect(0, 0, MM, MM);
+
+  const sc = MM / (VIEW_HALF * 2),
+    cx = MM / 2,
+    cy = MM / 2;
+  // Peta statis: posisi dunia (0,0) SELALU jatuh di tengah kotak (cx, cy).
+  const toMM = (wx, wz) => ({ x: cx + wx * sc, y: cy + wz * sc });
+
+  // Denah candi — bingkai luar (gelap) + isian dalam (terang), berlapis
+  function drawPlanLayer(pts, fillColor) {
+    mmCtx.beginPath();
+    pts.forEach(([wx, wz], i) => {
+      const p = toMM(wx, wz);
+      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+    });
+    mmCtx.closePath();
+    mmCtx.fillStyle = fillColor;
+    mmCtx.fill();
+    mmCtx.strokeStyle = MM_OUTLINE;
+    mmCtx.lineWidth = 1.3;
+    mmCtx.stroke();
+  }
+
+  buildStatueLayout();
+
+  // Denah candi — bentuk luar akurat hasil lacak dari gambar referensi
+  mmCtx.beginPath();
+  PLAN_PTS.forEach(([wx, wz], i) => {
+    const p = toMM(wx, wz);
+    i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+  });
+  mmCtx.closePath();
+  mmCtx.fillStyle = MM_PLAN;
+  mmCtx.fill();
+  mmCtx.strokeStyle = MM_OUTLINE;
+  mmCtx.lineWidth = 1.3;
+  mmCtx.stroke();
+
+  function drawPlanLayer(pts, fillColor) {
+    mmCtx.beginPath();
+    pts.forEach(([wx, wz], i) => {
+      const p = toMM(wx, wz);
+      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+    });
+    mmCtx.closePath();
+    mmCtx.fillStyle = fillColor;
+    mmCtx.fill();
+    mmCtx.strokeStyle = MM_OUTLINE;
+    mmCtx.lineWidth = 1;
+    mmCtx.stroke();
+  }
+  drawPlanLayer(_centerSq, MM_ROOM);
+  CORRIDORS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM));
+  ROOMS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM));
+
+  // Titik arca — posisi asli dari POIS, tanpa nama/label
+  mmCtx.fillStyle = MM_DOT;
+  DOTS_CACHE.forEach(([wx, wz]) => {
+    const dot = toMM(wx, wz);
+    mmCtx.beginPath();
+    mmCtx.arc(dot.x, dot.y, 2.8, 0, Math.PI * 2);
+    mmCtx.fill();
+  });
+
+  // Penanda posisi pemain — INI yang bergerak, bukan petanya
+  if (isSV) {
+    let mx = P.pos.x * sc,
+      mz = P.pos.z * sc;
+    const dist = Math.hypot(mx, mz);
+    if (dist > MARKER_MAX_R) {
+      const k = MARKER_MAX_R / dist; // tempel di tepi kalau pemain jalan terlalu jauh
+      mx *= k;
+      mz *= k;
+    }
+    mmCtx.save();
+    mmCtx.translate(cx + mx, cy + mz);
+    mmCtx.rotate(-P.yaw);
+    mmCtx.fillStyle = MM_MARKER;
+    mmCtx.beginPath();
+    mmCtx.moveTo(0, -8);
+    mmCtx.lineTo(5, 5);
+    mmCtx.lineTo(-5, 5);
+    mmCtx.closePath();
+    mmCtx.fill();
+    mmCtx.restore();
+  } else {
+    mmCtx.fillStyle = MM_MARKER;
+    mmCtx.beginPath();
+    mmCtx.arc(cx, cy, 5, 0, Math.PI * 2);
+    mmCtx.fill();
+  }
+
+  mmCtx.strokeStyle = MM_OUTLINE;
+  mmCtx.lineWidth = 2;
+  mmCtx.strokeRect(1, 1, MM - 2, MM - 2);
+}
+
+// ── LOAD MODEL ───────────────────────────────────────────────────
+barFill.style.width = "5%";
+barTxt.textContent = I18N[currentLang].loadModel;
+
+const draco = new DRACOLoader();
+draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
+const loader = new GLTFLoader();
+loader.setDRACOLoader(draco);
+
+loader.load(
+  "assets/candi_siwa.glb",
+  (gltf) => {
+    barFill.style.width = "72%";
+    stageTxt.textContent = I18N[currentLang].stageScaling;
+
+    const model = gltf.scene;
+    // Scale to 4.7 units tall (1 unit = 10 m real)
+    const box0 = new THREE.Box3().setFromObject(model);
+    const sf = 4.7 / (box0.max.y - box0.min.y);
+    model.scale.setScalar(sf);
+    const box1 = new THREE.Box3().setFromObject(model);
+    model.position.set(-(box1.min.x + box1.max.x) / 2, -box1.min.y, -(box1.min.z + box1.max.z) / 2);
+    model.updateMatrixWorld(true);
+
+    // Extract single geometry + material from the model
+    let rawGeo = null;
+    let srcMat = null;
+    model.traverse((o) => {
+      if (o.isMesh && !rawGeo) {
+        rawGeo = o.geometry.clone();
+        rawGeo.applyMatrix4(o.matrixWorld);
+        srcMat = o.material; // ← pakai material asli dari GLB
+      }
+    });
+    if (!rawGeo) {
+      errBox.style.display = "block";
+      errBox.textContent = "Geometry error";
+      return;
+    }
+
+    // Pastikan colorSpace benar jika ada texture
+    if (srcMat?.map) srcMat.map.colorSpace = THREE.SRGBColorSpace;
+    // DoubleSide = jaring pengaman kalau ada winding order yang
+    // terbalik di sebagian kecil geometri (tidak akan bolong/hitam)
+    if (srcMat) srcMat.side = THREE.DoubleSide;
+
+    // PENTING: applyMatrix4() di atas SUDAH mentransformasikan normal
+    // asli dari GLB dengan benar (pakai normal matrix, menangani
+    // rotasi/skala termasuk mirror). JANGAN hitung ulang normal kalau
+    // geometry sudah punya normal attribute — computeVertexNormals()
+    // menghitung dari winding segitiga dan bisa menghasilkan normal
+    // TERBALIK kalau ada skala negatif/mirror di node model (penyebab
+    // candi tampak hitam sebelumnya). Hanya hitung sebagai fallback
+    // kalau GLB benar-benar tidak menyertakan normal.
+    if (!rawGeo.attributes.normal) {
+      rawGeo.computeVertexNormals();
+    }
+
+    // ─ BUILD BVH ─────────────────────────────────────────────────
+    // BVH = Bounding Volume Hierarchy: partitions 3.37M triangles into a tree.
+    // Each raycast traverses the tree → O(log N) instead of O(N).
+    // At 3.37M triangles: O(N)≈3M ops per ray, O(log N)≈22 ops per ray.
+    barFill.style.width = "80%";
+    stageTxt.textContent = I18N[currentLang].stageBVH;
+    rawGeo.computeBoundsTree({ maxLeafTris: 8, strategy: 0 }); // SAH strategy
+
+    bvhMesh = new THREE.Mesh(rawGeo, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+    bvhMesh.matrixAutoUpdate = false;
+    scene.add(bvhMesh);
+
+    // ─ VISUAL MESH: spatial chunking for frustum culling ─────────
+    // Split geometry into GRID×GRID cells → each cell has its own
+    // bounding box → GPU automatically skips cells outside the view frustum.
+    barFill.style.width = "87%";
+    stageTxt.textContent = I18N[currentLang].stageChunks;
+
+    const GRID = 6;
+    const posA = rawGeo.attributes.position;
+    const idxA = rawGeo.index;
+    const norA = rawGeo.attributes.normal;
+
+    // World extent from position attribute
+    const minX = posA.array.reduce((m, v, i) => (i % 3 === 0 ? Math.min(m, v) : m), Infinity);
+    const maxX = posA.array.reduce((m, v, i) => (i % 3 === 0 ? Math.max(m, v) : m), -Infinity);
+    const minZ = posA.array.reduce((m, v, i) => (i % 3 === 2 ? Math.min(m, v) : m), Infinity);
+    const maxZ = posA.array.reduce((m, v, i) => (i % 3 === 2 ? Math.max(m, v) : m), -Infinity);
+    const cellW = (maxX - minX) / GRID,
+      cellD = (maxZ - minZ) / GRID;
+
+    // Build typed-array buckets for each cell — termasuk UV jika ada
+    const uvA = rawGeo.attributes.uv;
+    const cells = Array.from({ length: GRID * GRID }, () => ({ pos: [], nor: [], uv: [] }));
+    const triCount = idxA ? idxA.count / 3 : posA.count / 3;
+
+    for (let t = 0; t < triCount; t++) {
+      const i0 = idxA ? idxA.getX(t * 3) : t * 3;
+      const i1 = idxA ? idxA.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = idxA ? idxA.getX(t * 3 + 2) : t * 3 + 2;
+      const cx = (posA.getX(i0) + posA.getX(i1) + posA.getX(i2)) / 3;
+      const cz = (posA.getZ(i0) + posA.getZ(i1) + posA.getZ(i2)) / 3;
+      const gx = Math.min(GRID - 1, Math.max(0, Math.floor((cx - minX) / cellW)));
+      const gz = Math.min(GRID - 1, Math.max(0, Math.floor((cz - minZ) / cellD)));
+      const cell = cells[gz * GRID + gx];
+      for (const vi of [i0, i1, i2]) {
+        cell.pos.push(posA.getX(vi), posA.getY(vi), posA.getZ(vi));
+        if (norA) cell.nor.push(norA.getX(vi), norA.getY(vi), norA.getZ(vi));
+        if (uvA) cell.uv.push(uvA.getX(vi), uvA.getY(vi));
+      }
+    }
+
+    // Gunakan material asli dari GLB, fallback ke abu-abu batu andesit
+    const visMat =
+      srcMat ||
+      new THREE.MeshStandardMaterial({
+        color: 0x8a7d6b,
+        roughness: 0.88,
+        metalness: 0.04,
+        side: THREE.DoubleSide,
+      });
+    let chunks = 0;
+    for (const cell of cells) {
+      if (!cell.pos.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(cell.pos), 3));
+      if (cell.nor.length) g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(cell.nor), 3));
+      if (cell.uv.length) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(cell.uv), 2));
+      const m = new THREE.Mesh(g, visMat);
+      m.frustumCulled = true;
+      m.matrixAutoUpdate = false;
+      scene.add(m);
+      chunks++;
+    }
+
+    // Orbit camera target
+    orb.ty = 4.7 * 0.35;
+    orb.r = 12;
+    updateOrbit();
+
+    barFill.style.width = "100%";
+    stageTxt.textContent = "";
+    perfNote.textContent = `BVH aktif ✓ | ${(triCount / 1e3).toFixed(0)}K tri | ${chunks} chunks`;
+
+    loadSc.classList.add("hidden");
+    entrySc.classList.remove("hidden");
+    console.log(`✓ BVH: ${triCount.toLocaleString()} tris → O(log N) raycast | ${chunks} visual chunks`);
+  },
+
+  (evt) => {
+    const p = evt.lengthComputable ? 5 + (evt.loaded / evt.total) * 60 : 30;
+    barFill.style.width = p + "%";
+    barTxt.textContent = `${p.toFixed(0)}% · ${(evt.loaded / 1024 / 1024).toFixed(1)} MB`;
+  },
+
+  (err) => {
+    errBox.style.display = "block";
+    errBox.innerHTML = `❌ Gagal memuat model<br>${err.message || err}<br>Pastikan candi_siwa.glb ada di folder yang sama.`;
+    barTxt.textContent = I18N[currentLang].loadError;
+  },
+);
+
+// ── RENDER LOOP ──────────────────────────────────────────────────
+const clock = new THREE.Clock();
+let fc = 0,
+  lastT = performance.now(),
+  avgFps = 60;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  updatePlayer(dt);
+  updatePOIs();
+  if (fc++ % 15 === 0) drawMinimap();
+  renderer.render(scene, activeCamera);
+
+  const now = performance.now(),
+    ft = now - lastT;
+  lastT = now;
+  if (ft > 0 && ft < 500) avgFps = avgFps * 0.95 + (1000 / ft) * 0.05;
+
+  if (fc % 20 === 0) {
+    const col = avgFps < 40 ? "#f59e0b" : avgFps < 55 ? "#10b981" : "#00e676";
+    fpsEl.innerHTML = `FPS:${Math.round(avgFps)} <br>` + `<span style="color:${col};font-size:10px">` + `DC:${renderer.info.render.calls} TRI:${(renderer.info.render.triangles / 1e3).toFixed(0)}K</span>`;
+    if (isSV) posTxt.textContent = `x:${(P.pos.x * 10).toFixed(1)}m z:${(P.pos.z * 10).toFixed(1)}m ${P.onGround ? "🟢" : "🔴"}`;
+  }
+}
+animate();
+
+window.addEventListener("resize", () => {
+  renderer.setSize(innerWidth, innerHeight);
+  orbitCam.aspect = fpsCam.aspect = innerWidth / innerHeight;
+  orbitCam.updateProjectionMatrix();
+  fpsCam.updateProjectionMatrix();
+});
+
+// ── Terapkan bahasa tersimpan setelah semua deklarasi siap ──
+const savedLang = localStorage.getItem("candiSiwaLang") || "id";
+applyLanguage(savedLang);
