@@ -614,6 +614,52 @@ body {
   font-size: 11px;
 }
 
+/* ── Panah navigasi mobile ("arrows on the street") ────────────────
+   Sengaja pakai background solid (bukan backdrop-filter) — blur di atas
+   canvas WebGL yang terus render itu mahal buat GPU mobile (lihat juga
+   catatan soal #fpsBox). Ditampilkan/disembunyikan lewat JS (isMobile). */
+#navArrows {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: none; /* diaktifkan lewat JS saat isMobile && isSV */
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  touch-action: none;
+}
+.navArrow {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-on-primary);
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-card);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transform: perspective(140px) rotateX(30deg); /* kesan "nempel di lantai" ala Street View */
+  transition: background 0.1s ease;
+}
+.navArrow:active,
+.navArrow.pressed {
+  background: var(--color-accent);
+}
+#navBack {
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+  opacity: 0.85;
+}
+
 /* ===== Popup / kartu detail POI ===== */
 #poiModal {
   position: absolute;

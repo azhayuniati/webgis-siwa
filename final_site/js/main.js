@@ -18,6 +18,9 @@ const errBox = document.getElementById("errBox");
 const entrySc = document.getElementById("entryScreen");
 const xhair = document.getElementById("xhair");
 const lockMsg = document.getElementById("lockMsg");
+const navArrows = document.getElementById("navArrows");
+const navFwd = document.getElementById("navFwd");
+const navBack = document.getElementById("navBack");
 const btnSV = document.getElementById("btnSV");
 const btnOrb = document.getElementById("btnOrbit");
 const posTxt = document.getElementById("posTxt");
@@ -964,8 +967,9 @@ function safeRequestPointerLock() {
   else doRequest();
 }
 
-// ── POINTER LOCK ─────────────────────────────────────────────────
+// ── POINTER LOCK (desktop) ───────────────────────────────────────
 canvas.addEventListener("click", () => {
+  if (isMobile) return; // mobile pakai touch-drag look, bukan pointer lock
   if (isSV && !locked) {
     safeRequestPointerLock(); // ← ganti dari canvas.requestPointerLock()
   } else if (isSV && locked && activePOI && !poiOpen) {
@@ -976,7 +980,7 @@ document.addEventListener("pointerlockchange", () => {
   const wasLocked = locked;
   locked = document.pointerLockElement === canvas;
   if (wasLocked && !locked) lastUnlockTime = performance.now();
-  lockMsg.style.display = isSV && !locked ? "block" : "none";
+  lockMsg.style.display = isSV && !locked && !isMobile ? "block" : "none";
   xhair.style.display = isSV && locked ? "block" : "none";
 });
 document.addEventListener("mousemove", (e) => {
@@ -984,6 +988,75 @@ document.addEventListener("mousemove", (e) => {
   P.yaw -= e.movementX * 0.0018;
   P.pitch = Math.max(-1.3, Math.min(1.3, P.pitch - e.movementY * 0.0018));
 });
+
+// ── TOUCH LOOK (mobile) ──────────────────────────────────────────
+// Gantinya pointer lock: drag jari di mana saja di canvas buat menoleh.
+// Tap di tombol panah / hotspot dot tidak kena ini karena elemen itu
+// terpisah dari canvas (event-nya tidak akan sampai ke sini).
+let touchLookId = null,
+  lastTouchX = 0,
+  lastTouchY = 0;
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    if (!isMobile || !isSV || poiOpen) return;
+    const t = e.changedTouches[0];
+    touchLookId = t.identifier;
+    lastTouchX = t.clientX;
+    lastTouchY = t.clientY;
+  },
+  { passive: true }
+);
+canvas.addEventListener(
+  "touchmove",
+  (e) => {
+    if (!isMobile || !isSV || poiOpen || touchLookId === null) return;
+    let t = null;
+    for (const ct of e.changedTouches) if (ct.identifier === touchLookId) t = ct;
+    if (!t) return;
+    const dx = t.clientX - lastTouchX,
+      dy = t.clientY - lastTouchY;
+    lastTouchX = t.clientX;
+    lastTouchY = t.clientY;
+    P.yaw -= dx * 0.0032; // sedikit lebih sensitif dari mouse, drag jari biasanya pendek
+    P.pitch = Math.max(-1.3, Math.min(1.3, P.pitch - dy * 0.0032));
+    e.preventDefault(); // cegah halaman ikut ke-scroll pas drag
+  },
+  { passive: false }
+);
+canvas.addEventListener(
+  "touchend",
+  (e) => {
+    let stillDown = false;
+    for (const t of e.touches) if (t.identifier === touchLookId) stillDown = true;
+    if (!stillDown) touchLookId = null;
+  },
+  { passive: true }
+);
+
+// ── NAV ARROWS (mobile) ──────────────────────────────────────────
+// "Arrows on the street": tap & tahan = jalan, sama seperti nahan W/S.
+// Dipasang ke object K yang sama biar logic updatePlayer() tidak berubah.
+function bindHoldButton(el, code) {
+  if (!el) return;
+  const press = (e) => {
+    e.preventDefault();
+    K[code] = true;
+    el.classList.add("pressed");
+  };
+  const release = () => {
+    K[code] = false;
+    el.classList.remove("pressed");
+  };
+  el.addEventListener("touchstart", press, { passive: false });
+  el.addEventListener("touchend", release);
+  el.addEventListener("touchcancel", release);
+  el.addEventListener("mousedown", press); // fallback buat tes pakai device toolbar di desktop
+  el.addEventListener("mouseup", release);
+  el.addEventListener("mouseleave", release);
+}
+bindHoldButton(navFwd, "KeyW");
+bindHoldButton(navBack, "KeyS");
 
 // ── KEYBOARD ─────────────────────────────────────────────────────
 const K = {};
@@ -1011,9 +1084,14 @@ function enterSV() {
   activeCamera = fpsCam;
   btnSV.classList.add("active");
   btnOrb.classList.remove("active");
-  lockMsg.style.display = "block";
+  if (isMobile) {
+    navArrows.style.display = "flex"; // panah navigasi cuma buat mobile
+    document.getElementById("hints").style.display = "none"; // hint keyboard tidak relevan di HP
+  } else {
+    lockMsg.style.display = "block";
+    document.getElementById("hints").style.display = "";
+  }
   entrySc.classList.add("hidden");
-  document.getElementById("hints").style.display = "";
   // Street-view render settings: lower pixel ratio + tight fog = fewer fragments
   renderer.setPixelRatio(Math.min(devicePixelRatio, PR_SV_MAX));
   scene.fog.near = FOG_NEAR_SV;
@@ -1031,6 +1109,9 @@ function exitSV() {
   btnSV.classList.remove("active");
   xhair.style.display = "none";
   lockMsg.style.display = "none";
+  navArrows.style.display = "none";
+  K.KeyW = false; // pastikan tombol panah yang lagi ditahan tidak "nyangkut" jalan terus
+  K.KeyS = false;
   // Restore full quality for orbit view
   renderer.setPixelRatio(Math.min(devicePixelRatio, PR_ORBIT_MAX));
   scene.fog.near = FOG_NEAR_ORBIT;
