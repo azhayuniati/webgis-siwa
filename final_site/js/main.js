@@ -123,6 +123,13 @@ function applyLanguage(lang) {
 }
 
 // ── RENDERER ─────────────────────────────────────────────────────
+// Deteksi mobile: GPU & CPU HP jauh lebih lemah, jadi cap resolusi render
+// (pixel ratio) lebih rendah supaya jumlah fragment yang diproses GPU
+// jauh lebih sedikit. Ini penyebab #1 FPS 29-30 di HP vs mulus di laptop.
+const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const PR_ORBIT_MAX = isMobile ? 1.25 : 2; // sebelumnya selalu 2
+const PR_SV_MAX = isMobile ? 0.75 : 1.0; // sebelumnya selalu 1.0
+
 // antialias OFF for performance; we re-enable only in orbit mode
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -131,7 +138,7 @@ const renderer = new THREE.WebGLRenderer({
   stencil: false,
   depth: true,
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, PR_ORBIT_MAX));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -994,6 +1001,7 @@ document.addEventListener("keyup", (e) => (K[e.code] = false));
 
 // ── MODE SWITCH ──────────────────────────────────────────────────
 function enterSV() {
+  ensureBVHReady(); // bangun BVH baru sekarang, bukan sejak awal load
   isSV = true;
   P.pos.copy(SPAWN_POS);
   P.yaw = SPAWN_YAW;
@@ -1007,7 +1015,7 @@ function enterSV() {
   entrySc.classList.add("hidden");
   document.getElementById("hints").style.display = "";
   // Street-view render settings: lower pixel ratio + tight fog = fewer fragments
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.0));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, PR_SV_MAX));
   scene.fog.near = FOG_NEAR_SV;
   scene.fog.far = FOG_FAR_SV;
   fpsCam.far = FOG_FAR_SV;
@@ -1024,7 +1032,7 @@ function exitSV() {
   xhair.style.display = "none";
   lockMsg.style.display = "none";
   // Restore full quality for orbit view
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, PR_ORBIT_MAX));
   scene.fog.near = FOG_NEAR_ORBIT;
   scene.fog.far = FOG_FAR_ORBIT;
   fpsCam.far = FOG_FAR_ORBIT;
@@ -1036,7 +1044,23 @@ document.getElementById("enterBtn").addEventListener("click", enterSV);
 
 // ── BVH COLLISION ────────────────────────────────────────────────
 // One invisible mesh with BVH — O(log N) raycast instead of O(N)
-let bvhMesh = null; // set after model loads
+let bvhMesh = null; // dibangun lazy, baru saat pertama kali masuk Street View
+let rawGeoRef = null; // referensi geometry mentah, diisi setelah model selesai load
+let bvhBuilding = false; // guard supaya tidak dobel-build kalau user klik cepat
+
+function ensureBVHReady() {
+  if (bvhMesh || bvhBuilding || !rawGeoRef) return; // sudah ada / lagi proses / geometry belum siap
+  bvhBuilding = true;
+  // BVH cuma dipakai buat collision jalan kaki di Street View — Orbit tidak
+  // butuh ini sama sekali. Ditunda sampai baru dibutuhkan supaya loading
+  // awal (yang dilihat SEMUA user, termasuk yang cuma mau Orbit) jauh lebih cepat,
+  // terutama di HP yang CPU-nya jauh lebih lambat untuk kerjaan berat begini.
+  rawGeoRef.computeBoundsTree({ maxLeafTris: 8, strategy: 0 }); // SAH strategy
+  bvhMesh = new THREE.Mesh(rawGeoRef, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  bvhMesh.matrixAutoUpdate = false;
+  scene.add(bvhMesh);
+  bvhBuilding = false;
+}
 
 let _frame = 0;
 
@@ -1449,7 +1473,7 @@ barFill.style.width = "5%";
 barTxt.textContent = I18N[currentLang].loadModel;
 
 const draco = new DRACOLoader();
-draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
+draco.setDecoderPath("./library/draco/"); // self-hosted, tidak lagi bergantung ke gstatic.com
 const loader = new GLTFLoader();
 loader.setDRACOLoader(draco);
 
@@ -1502,17 +1526,14 @@ loader.load(
       rawGeo.computeVertexNormals();
     }
 
-    // ─ BUILD BVH ─────────────────────────────────────────────────
-    // BVH = Bounding Volume Hierarchy: partitions 3.37M triangles into a tree.
-    // Each raycast traverses the tree → O(log N) instead of O(N).
-    // At 3.37M triangles: O(N)≈3M ops per ray, O(log N)≈22 ops per ray.
+    // ─ BVH ditunda ──────────────────────────────────────────────
+    // BVH (collision tree) TIDAK dibangun di sini lagi — cuma dipakai
+    // saat Street View, jadi ditunda ke ensureBVHReady() yang dipanggil
+    // dari enterSV(). Ini bikin loading awal jauh lebih cepat, terutama
+    // di HP, karena kerjaan CPU paling berat (computeBoundsTree atas
+    // 3.37M triangle) tidak lagi dikerjakan di depan buat SEMUA user.
     barFill.style.width = "80%";
-    stageTxt.textContent = I18N[currentLang].stageBVH;
-    rawGeo.computeBoundsTree({ maxLeafTris: 8, strategy: 0 }); // SAH strategy
-
-    bvhMesh = new THREE.Mesh(rawGeo, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
-    bvhMesh.matrixAutoUpdate = false;
-    scene.add(bvhMesh);
+    rawGeoRef = rawGeo; // simpan referensi, dipakai nanti oleh ensureBVHReady()
 
     // ─ VISUAL MESH: spatial chunking for frustum culling ─────────
     // Split geometry into GRID×GRID cells → each cell has its own
@@ -1524,20 +1545,32 @@ loader.load(
     const posA = rawGeo.attributes.position;
     const idxA = rawGeo.index;
     const norA = rawGeo.attributes.normal;
+    const uvA = rawGeo.attributes.uv;
+    const triCount = idxA ? idxA.count / 3 : posA.count / 3;
 
-    // World extent from position attribute
-    const minX = posA.array.reduce((m, v, i) => (i % 3 === 0 ? Math.min(m, v) : m), Infinity);
-    const maxX = posA.array.reduce((m, v, i) => (i % 3 === 0 ? Math.max(m, v) : m), -Infinity);
-    const minZ = posA.array.reduce((m, v, i) => (i % 3 === 2 ? Math.min(m, v) : m), Infinity);
-    const maxZ = posA.array.reduce((m, v, i) => (i % 3 === 2 ? Math.max(m, v) : m), -Infinity);
+    // World extent — 1x loop biasa, ganti 4x .reduce() yang tiap panggil
+    // scan ulang seluruh array posisi (2.75 juta vertex x 4 = mubazir).
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = 0; i < posA.count; i++) {
+      const x = posA.getX(i),
+        z = posA.getZ(i);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
     const cellW = (maxX - minX) / GRID,
       cellD = (maxZ - minZ) / GRID;
 
-    // Build typed-array buckets for each cell — termasuk UV jika ada
-    const uvA = rawGeo.attributes.uv;
-    const cells = Array.from({ length: GRID * GRID }, () => ({ pos: [], nor: [], uv: [] }));
-    const triCount = idxA ? idxA.count / 3 : posA.count / 3;
-
+    // PASS 1: cuma hitung berapa triangle masuk tiap cell dulu.
+    // Tujuannya supaya di PASS 2 kita bisa langsung alokasi Float32Array
+    // dengan ukuran PAS dari awal — tidak ada array.push() yang bikin
+    // engine JS resize & copy buffer berkali-kali (mahal untuk jutaan elemen).
+    const cellTriCount = new Uint32Array(GRID * GRID);
+    const triCellIdx = new Uint8Array(triCount); // GRID*GRID=36 → muat di Uint8
     for (let t = 0; t < triCount; t++) {
       const i0 = idxA ? idxA.getX(t * 3) : t * 3;
       const i1 = idxA ? idxA.getX(t * 3 + 1) : t * 3 + 1;
@@ -1546,12 +1579,48 @@ loader.load(
       const cz = (posA.getZ(i0) + posA.getZ(i1) + posA.getZ(i2)) / 3;
       const gx = Math.min(GRID - 1, Math.max(0, Math.floor((cx - minX) / cellW)));
       const gz = Math.min(GRID - 1, Math.max(0, Math.floor((cz - minZ) / cellD)));
-      const cell = cells[gz * GRID + gx];
+      const cellIdx = gz * GRID + gx;
+      triCellIdx[t] = cellIdx;
+      cellTriCount[cellIdx]++;
+    }
+
+    // Alokasi Float32Array pas ukuran per cell (sekali alokasi, tanpa resize)
+    const cellPos = [],
+      cellNor = [],
+      cellUv = [];
+    const cellCursor = new Uint32Array(GRID * GRID);
+    for (let c = 0; c < GRID * GRID; c++) {
+      const nVerts = cellTriCount[c] * 3;
+      cellPos.push(nVerts ? new Float32Array(nVerts * 3) : null);
+      cellNor.push(norA && nVerts ? new Float32Array(nVerts * 3) : null);
+      cellUv.push(uvA && nVerts ? new Float32Array(nVerts * 2) : null);
+    }
+
+    // PASS 2: isi langsung by-index ke typed array (bukan push lagi)
+    for (let t = 0; t < triCount; t++) {
+      const cellIdx = triCellIdx[t];
+      const i0 = idxA ? idxA.getX(t * 3) : t * 3;
+      const i1 = idxA ? idxA.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = idxA ? idxA.getX(t * 3 + 2) : t * 3 + 2;
+      let cursor = cellCursor[cellIdx];
       for (const vi of [i0, i1, i2]) {
-        cell.pos.push(posA.getX(vi), posA.getY(vi), posA.getZ(vi));
-        if (norA) cell.nor.push(norA.getX(vi), norA.getY(vi), norA.getZ(vi));
-        if (uvA) cell.uv.push(uvA.getX(vi), uvA.getY(vi));
+        const b3 = cursor * 3;
+        cellPos[cellIdx][b3] = posA.getX(vi);
+        cellPos[cellIdx][b3 + 1] = posA.getY(vi);
+        cellPos[cellIdx][b3 + 2] = posA.getZ(vi);
+        if (norA) {
+          cellNor[cellIdx][b3] = norA.getX(vi);
+          cellNor[cellIdx][b3 + 1] = norA.getY(vi);
+          cellNor[cellIdx][b3 + 2] = norA.getZ(vi);
+        }
+        if (uvA) {
+          const b2 = cursor * 2;
+          cellUv[cellIdx][b2] = uvA.getX(vi);
+          cellUv[cellIdx][b2 + 1] = uvA.getY(vi);
+        }
+        cursor++;
       }
+      cellCursor[cellIdx] = cursor;
     }
 
     // Gunakan material asli dari GLB, fallback ke abu-abu batu andesit
@@ -1564,12 +1633,12 @@ loader.load(
         side: THREE.DoubleSide,
       });
     let chunks = 0;
-    for (const cell of cells) {
-      if (!cell.pos.length) continue;
+    for (let c = 0; c < GRID * GRID; c++) {
+      if (!cellPos[c]) continue;
       const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(cell.pos), 3));
-      if (cell.nor.length) g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(cell.nor), 3));
-      if (cell.uv.length) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(cell.uv), 2));
+      g.setAttribute("position", new THREE.BufferAttribute(cellPos[c], 3));
+      if (cellNor[c]) g.setAttribute("normal", new THREE.BufferAttribute(cellNor[c], 3));
+      if (cellUv[c]) g.setAttribute("uv", new THREE.BufferAttribute(cellUv[c], 2));
       const m = new THREE.Mesh(g, visMat);
       m.frustumCulled = true;
       m.matrixAutoUpdate = false;
@@ -1584,7 +1653,7 @@ loader.load(
 
     barFill.style.width = "100%";
     stageTxt.textContent = "";
-    perfNote.textContent = `BVH aktif ✓ | ${(triCount / 1e3).toFixed(0)}K tri | ${chunks} chunks`;
+    perfNote.textContent = `${(triCount / 1e3).toFixed(0)}K tri | ${chunks} chunks | BVH: on-demand`;
 
     loadSc.classList.add("hidden");
     entrySc.classList.remove("hidden");
