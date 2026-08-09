@@ -130,6 +130,7 @@ function applyLanguage(lang) {
 // (pixel ratio) lebih rendah supaya jumlah fragment yang diproses GPU
 // jauh lebih sedikit. Ini penyebab #1 FPS 29-30 di HP vs mulus di laptop.
 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+document.body.classList.toggle("is-mobile", isMobile); // dipakai buat override layout khusus HP di CSS
 const PR_ORBIT_MAX = isMobile ? 1.25 : 2; // sebelumnya selalu 2
 const PR_SV_MAX = isMobile ? 0.75 : 1.0; // sebelumnya selalu 1.0
 
@@ -869,6 +870,38 @@ function updatePOIs() {
   poiPrompt.classList.toggle("hidden", !nearest || poiOpen);
 }
 
+// ── PANAH MAJU: proyeksi titik di lantai ke layar (gaya Google Maps AR /
+// Street View chevron) — hanya aktif di mobile. Titik dunia diambil sedikit
+// di depan pemain, di ketinggian lantai (P.pos.y - eyeH), lalu diproyeksikan
+// pakai camera.project() — pola yang sama seperti poiDot di atas.
+const _navPt = new THREE.Vector3();
+const NAV_AHEAD = 0.6; // jarak "di depan" dlm unit dunia — TUNING: sesuaikan sambil tes di device asli
+function updateNavArrow() {
+  if (!isMobile) return;
+  if (!isSV || poiOpen) {
+    navFwd.style.display = "none";
+    return;
+  }
+  _navPt.set(P.pos.x + Math.sin(P.yaw) * NAV_AHEAD, P.pos.y - P.eyeH, P.pos.z + Math.cos(P.yaw) * NAV_AHEAD);
+  _navPt.project(fpsCam);
+  const offscreen = _navPt.z > 1 || _navPt.z < -1 || _navPt.x < -1.05 || _navPt.x > 1.05 || _navPt.y < -1.05 || _navPt.y > 1.05;
+  if (offscreen) {
+    // Fallback: kalau titik di depan kebetulan keluar frame (misal pemain
+    // lagi tengok tajam ke samping), tetap tampilkan di bawah-tengah layar
+    // supaya panah tidak hilang total.
+    navFwd.style.display = "flex";
+    navFwd.style.left = innerWidth / 2 + "px";
+    navFwd.style.top = innerHeight * 0.72 + "px";
+    navFwd.style.transform = "translate(-50%, -50%) scale(1)";
+    return;
+  }
+  navFwd.style.display = "flex";
+  navFwd.style.left = (_navPt.x * 0.5 + 0.5) * innerWidth + "px";
+  navFwd.style.top = (1 - (_navPt.y * 0.5 + 0.5)) * innerHeight + "px";
+  const scale = Math.max(0.75, Math.min(1.3, 1.25 - _navPt.z * 0.5)); // makin jauh (z besar) → makin kecil, kesan depth
+  navFwd.style.transform = `translate(-50%, -50%) scale(${scale})`;
+}
+
 let activePOIRef = null;
 
 function refreshPOIText(p) {
@@ -1058,6 +1091,15 @@ function bindHoldButton(el, code) {
 bindHoldButton(navFwd, "KeyW");
 bindHoldButton(navBack, "KeyS");
 
+// ── TAP UNTUK BUKA INFO POI (mobile) ─────────────────────────────
+// Di desktop prompt ini cuma indikator (tekan E beneran di keyboard).
+// Di HP tidak ada keyboard, jadi prompt-nya sendiri harus bisa di-tap
+// (CSS .is-mobile #poiPrompt sudah set pointer-events:auto).
+poiPrompt.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (isSV && activePOI && !poiOpen) openPOI(activePOI);
+});
+
 // ── KEYBOARD ─────────────────────────────────────────────────────
 const K = {};
 document.addEventListener("keydown", (e) => {
@@ -1110,6 +1152,7 @@ function exitSV() {
   xhair.style.display = "none";
   lockMsg.style.display = "none";
   navArrows.style.display = "none";
+  navFwd.style.display = "none";
   K.KeyW = false; // pastikan tombol panah yang lagi ditahan tidak "nyangkut" jalan terus
   K.KeyS = false;
   // Restore full quality for orbit view
@@ -1765,6 +1808,7 @@ function animate() {
   const dt = clock.getDelta();
   updatePlayer(dt);
   updatePOIs();
+  updateNavArrow();
   if (fc++ % 15 === 0) drawMinimap();
   renderer.render(scene, activeCamera);
 

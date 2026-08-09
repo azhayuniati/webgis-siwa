@@ -418,6 +418,98 @@ body {
   font-weight: 400;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE LAYOUT OVERRIDES
+   Body dapat class "is-mobile" dari JS (deteksi userAgent, sama
+   dengan flag isMobile yang dipakai buat pixel ratio & touch control).
+   Desktop TIDAK kena apa pun di bawah ini.
+   ══════════════════════════════════════════════════════════════════ */
+.is-mobile #topbar {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  max-width: calc(100vw - 2 * var(--space-3));
+  left: var(--space-3);
+  right: var(--space-3);
+}
+.is-mobile .ttl {
+  font-size: 14px;
+}
+.is-mobile .tloc {
+  font-size: 10px;
+}
+.is-mobile .tera {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+.is-mobile #modeBtns {
+  top: 122px; /* topbar mobile bisa 2 baris, kasih jarak lebih */
+  left: var(--space-3);
+}
+.is-mobile #fpsBox {
+  top: 122px;
+  right: var(--space-3);
+  font-size: 10px;
+  padding: 6px 10px;
+}
+
+/* Info card: dari nempel di bawah (nabrak panah navigasi) → dipindah ke
+   atas, kanan, di bawah FPS box. Dibikin lebih ringkas juga. */
+.is-mobile #info {
+  bottom: auto;
+  top: 170px;
+  left: auto;
+  right: var(--space-3);
+  width: 148px;
+  padding: var(--space-3);
+}
+.is-mobile #info h3 {
+  font-size: 14px;
+}
+.is-mobile .iloc {
+  font-size: 8px;
+  margin-bottom: var(--space-2);
+}
+.is-mobile .irow {
+  font-size: 10px;
+  padding: 4px 0;
+}
+.is-mobile #posTxt {
+  font-size: 8px;
+}
+
+/* Minimap: diperkecil + digeser ke pojok kiri bawah, biar area
+   tengah-bawah kosong buat panah navigasi. */
+.is-mobile #mmBox {
+  left: var(--space-3);
+  right: auto;
+  bottom: var(--space-3);
+  width: 92px;
+  height: 92px;
+}
+.is-mobile #mm {
+  width: 92px;
+  height: 92px;
+}
+
+/* Prompt "Lihat informasi": dibikin bisa di-tap (lihat Fix 3 di JS),
+   badge tombol "E" disembunyikan karena HP tidak punya keyboard. */
+.is-mobile #poiPrompt {
+  pointer-events: auto;
+  cursor: pointer;
+  top: 60%;
+}
+.is-mobile .poiPromptKey {
+  display: none;
+}
+
+/* Target tap poiDot diperbesar sedikit — 16px terlalu kecil buat jari */
+.is-mobile .poiDot {
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+}
+
 #xhair {
   position: absolute;
   top: 50%;
@@ -618,6 +710,41 @@ body {
    Sengaja pakai background solid (bukan backdrop-filter) — blur di atas
    canvas WebGL yang terus render itu mahal buat GPU mobile (lihat juga
    catatan soal #fpsBox). Ditampilkan/disembunyikan lewat JS (isMobile). */
+
+/* Panah MAJU — posisi (left/top) di-set JS tiap frame lewat updateNavArrow(),
+   hasil proyeksi titik di lantai depan pemain ke koordinat layar. Dibikin
+   agak besar biar gampang di-tap sambil jalan. */
+#navFwd {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-on-primary);
+  color: var(--color-on-primary);
+  font-size: 28px;
+  line-height: 1;
+  display: none; /* JS ganti ke "flex" saat visible */
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.4),
+    0 0 0 6px rgba(61, 107, 101, 0.22);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  z-index: 14;
+}
+#navFwd.pressed {
+  background: #8fd6cb;
+}
+
+/* Panah MUNDUR — tombol tetap, tidak ikut diproyeksikan (titik di
+   belakang pemain biasanya di luar frame kamera, jadi tidak masuk akal
+   diproyeksikan). */
 #navArrows {
   position: absolute;
   left: 50%;
@@ -625,39 +752,31 @@ body {
   transform: translateX(-50%);
   z-index: 15;
   display: none; /* diaktifkan lewat JS saat isMobile && isSV */
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
   touch-action: none;
 }
-.navArrow {
-  width: 60px;
-  height: 60px;
+#navBack {
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-on-primary);
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: var(--shadow-card);
+  opacity: 0.85;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
-  transform: perspective(140px) rotateX(30deg); /* kesan "nempel di lantai" ala Street View */
-  transition: background 0.1s ease;
+  touch-action: none;
 }
-.navArrow:active,
-.navArrow.pressed {
+#navBack:active,
+#navBack.pressed {
   background: var(--color-accent);
-}
-#navBack {
-  width: 48px;
-  height: 48px;
-  font-size: 18px;
-  opacity: 0.85;
+  opacity: 1;
 }
 
 /* ===== Popup / kartu detail POI ===== */
