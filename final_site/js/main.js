@@ -18,13 +18,11 @@ const errBox = document.getElementById("errBox");
 const entrySc = document.getElementById("entryScreen");
 const xhair = document.getElementById("xhair");
 const lockMsg = document.getElementById("lockMsg");
-const navArrows = document.getElementById("navArrows");
-const navFwd = document.getElementById("navFwd");
-const navBack = document.getElementById("navBack");
+const joystick = document.getElementById("joystick");
+const joystickKnob = document.getElementById("joystickKnob");
+const infoBox = document.getElementById("info");
 const btnSV = document.getElementById("btnSV");
 const btnOrb = document.getElementById("btnOrbit");
-const posTxt = document.getElementById("posTxt");
-const perfNote = document.getElementById("perfNote");
 const fpsEl = document.getElementById("fpsBox");
 const poiLayer = document.getElementById("poiLayer");
 const poiPrompt = document.getElementById("poiPrompt");
@@ -337,7 +335,7 @@ const POIS = [
     dir: { id: "Selatan", en: "South" },
     pos: new THREE.Vector3(-0.038, 0.934, 0.605),
     radius: 0.35,
-    img: "./assets/poi/siwa.jpg",
+    img: "./assets/poi/agastya.jpg",
     audio: {
       id: "./assets/audio/agastya_id.mp3",
       en: "./assets/audio/agastya_en.mp3",
@@ -870,37 +868,71 @@ function updatePOIs() {
   poiPrompt.classList.toggle("hidden", !nearest || poiOpen);
 }
 
-// ── PANAH MAJU: proyeksi titik di lantai ke layar (gaya Google Maps AR /
-// Street View chevron) — hanya aktif di mobile. Titik dunia diambil sedikit
-// di depan pemain, di ketinggian lantai (P.pos.y - eyeH), lalu diproyeksikan
-// pakai camera.project() — pola yang sama seperti poiDot di atas.
-const _navPt = new THREE.Vector3();
-const NAV_AHEAD = 0.6; // jarak "di depan" dlm unit dunia — TUNING: sesuaikan sambil tes di device asli
-function updateNavArrow() {
-  if (!isMobile) return;
-  if (!isSV || poiOpen) {
-    navFwd.style.display = "none";
-    return;
-  }
-  _navPt.set(P.pos.x + Math.sin(P.yaw) * NAV_AHEAD, P.pos.y - P.eyeH, P.pos.z + Math.cos(P.yaw) * NAV_AHEAD);
-  _navPt.project(fpsCam);
-  const offscreen = _navPt.z > 1 || _navPt.z < -1 || _navPt.x < -1.05 || _navPt.x > 1.05 || _navPt.y < -1.05 || _navPt.y > 1.05;
-  if (offscreen) {
-    // Fallback: kalau titik di depan kebetulan keluar frame (misal pemain
-    // lagi tengok tajam ke samping), tetap tampilkan di bawah-tengah layar
-    // supaya panah tidak hilang total.
-    navFwd.style.display = "flex";
-    navFwd.style.left = innerWidth / 2 + "px";
-    navFwd.style.top = innerHeight * 0.72 + "px";
-    navFwd.style.transform = "translate(-50%, -50%) scale(1)";
-    return;
-  }
-  navFwd.style.display = "flex";
-  navFwd.style.left = (_navPt.x * 0.5 + 0.5) * innerWidth + "px";
-  navFwd.style.top = (1 - (_navPt.y * 0.5 + 0.5)) * innerHeight + "px";
-  const scale = Math.max(0.75, Math.min(1.3, 1.25 - _navPt.z * 0.5)); // makin jauh (z besar) → makin kecil, kesan depth
-  navFwd.style.transform = `translate(-50%, -50%) scale(${scale})`;
+// ── VIRTUAL JOYSTICK (mobile) ────────────────────────────────────
+// Gerakan analog: posisi jempol relatif titik tengah joystick di-map
+// ke K.KeyW/S/A/D yang sama persis dipakai updatePlayer() untuk WASD —
+// jadi 100% konsisten sama gerakan desktop, termasuk gerak diagonal
+// (nahan maju + geser kanan sekaligus, dsb).
+const JOY_MAX_R = 42; // radius maksimum jempol boleh geser dari pusat (px)
+const JOY_DEAD = 0.28; // deadzone (0..1) — di bawah ini dianggap diam
+let joyTouchId = null,
+  joyCenterX = 0,
+  joyCenterY = 0;
+
+function joyReset() {
+  K.KeyW = K.KeyS = K.KeyA = K.KeyD = false;
+  joystickKnob.style.transform = "translate(-50%, -50%)";
 }
+function joyUpdate(clientX, clientY) {
+  let dx = clientX - joyCenterX,
+    dy = clientY - joyCenterY;
+  const dist = Math.hypot(dx, dy);
+  if (dist > JOY_MAX_R) {
+    dx = (dx / dist) * JOY_MAX_R;
+    dy = (dy / dist) * JOY_MAX_R;
+  }
+  joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  const nx = dx / JOY_MAX_R,
+    ny = dy / JOY_MAX_R; // -1..1
+  K.KeyW = ny < -JOY_DEAD;
+  K.KeyS = ny > JOY_DEAD;
+  K.KeyA = nx < -JOY_DEAD;
+  K.KeyD = nx > JOY_DEAD;
+}
+joystick.addEventListener(
+  "touchstart",
+  (e) => {
+    if (joyTouchId !== null) return; // sudah ada jari lain yang pegang
+    const t = e.changedTouches[0];
+    joyTouchId = t.identifier;
+    const r = joystick.getBoundingClientRect();
+    joyCenterX = r.left + r.width / 2;
+    joyCenterY = r.top + r.height / 2;
+    joyUpdate(t.clientX, t.clientY);
+    e.preventDefault();
+  },
+  { passive: false }
+);
+joystick.addEventListener(
+  "touchmove",
+  (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyTouchId) joyUpdate(t.clientX, t.clientY);
+    }
+    e.preventDefault();
+  },
+  { passive: false }
+);
+function joyEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyTouchId) {
+      joyTouchId = null;
+      joyReset();
+    }
+  }
+}
+joystick.addEventListener("touchend", joyEnd);
+joystick.addEventListener("touchcancel", joyEnd);
 
 let activePOIRef = null;
 
@@ -1067,30 +1099,6 @@ canvas.addEventListener(
   { passive: true }
 );
 
-// ── NAV ARROWS (mobile) ──────────────────────────────────────────
-// "Arrows on the street": tap & tahan = jalan, sama seperti nahan W/S.
-// Dipasang ke object K yang sama biar logic updatePlayer() tidak berubah.
-function bindHoldButton(el, code) {
-  if (!el) return;
-  const press = (e) => {
-    e.preventDefault();
-    K[code] = true;
-    el.classList.add("pressed");
-  };
-  const release = () => {
-    K[code] = false;
-    el.classList.remove("pressed");
-  };
-  el.addEventListener("touchstart", press, { passive: false });
-  el.addEventListener("touchend", release);
-  el.addEventListener("touchcancel", release);
-  el.addEventListener("mousedown", press); // fallback buat tes pakai device toolbar di desktop
-  el.addEventListener("mouseup", release);
-  el.addEventListener("mouseleave", release);
-}
-bindHoldButton(navFwd, "KeyW");
-bindHoldButton(navBack, "KeyS");
-
 // ── TAP UNTUK BUKA INFO POI (mobile) ─────────────────────────────
 // Di desktop prompt ini cuma indikator (tekan E beneran di keyboard).
 // Di HP tidak ada keyboard, jadi prompt-nya sendiri harus bisa di-tap
@@ -1126,8 +1134,9 @@ function enterSV() {
   activeCamera = fpsCam;
   btnSV.classList.add("active");
   btnOrb.classList.remove("active");
+  infoBox.style.display = "none"; // kotak info candi cuma relevan di mode Orbit
   if (isMobile) {
-    navArrows.style.display = "flex"; // panah navigasi cuma buat mobile
+    joystick.style.display = "block"; // joystick cuma buat mobile
     document.getElementById("hints").style.display = "none"; // hint keyboard tidak relevan di HP
   } else {
     lockMsg.style.display = "block";
@@ -1149,12 +1158,16 @@ function exitSV() {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   btnOrb.classList.add("active");
   btnSV.classList.remove("active");
+  infoBox.style.display = ""; // tampilkan lagi di mode Orbit
   xhair.style.display = "none";
   lockMsg.style.display = "none";
-  navArrows.style.display = "none";
-  navFwd.style.display = "none";
-  K.KeyW = false; // pastikan tombol panah yang lagi ditahan tidak "nyangkut" jalan terus
+  joystick.style.display = "none";
+  joyTouchId = null;
+  K.KeyW = false; // pastikan arah yang lagi ditahan tidak "nyangkut" jalan terus
   K.KeyS = false;
+  K.KeyA = false;
+  K.KeyD = false;
+  joystickKnob.style.transform = "translate(-50%, -50%)";
   // Restore full quality for orbit view
   renderer.setPixelRatio(Math.min(devicePixelRatio, PR_ORBIT_MAX));
   scene.fog.near = FOG_NEAR_ORBIT;
@@ -1389,30 +1402,28 @@ const MARKER_MAX_R = MM / 2 - 14; // batas jarak penanda pemain dari pusat, biar
 const FW = 2.5;
 
 // Satu "lengan" denah (dari puncak Selatan ke puncak Barat), dilacak
-// LANGSUNG dari piksel gambar referensi yang kamu kirim — bukan
-// tebakan tangan lagi — lalu dinormalisasi ke rentang -1..1.
-// Kenapa cuma satu lengan: pada gambar referensi sisi Utara & Timur
-// terpotong crop, sedangkan sisi Selatan & Barat utuh — jadi lengan
-// inilah yang paling akurat, lalu digandakan 4x via rotasi 90° supaya
-// hasil akhirnya PASTI simetris sempurna (tidak ada sisi yang menceng).
+// SECARA OTOMATIS dari piksel gambar referensi (contour detection,
+// bukan tebakan manual) — lalu dinormalisasi ke rentang -1..1 dan
+// digandakan 4x via rotasi 90° supaya hasil akhirnya simetris sempurna.
 const _planQuad = [
-  [0, 0.982],
-  [-0.126, 0.964],
-  [-0.135, 0.874],
-  [-0.198, 0.838],
-  [-0.207, 0.793],
-  [-0.441, 0.793],
-  [-0.459, 0.775],
-  [-0.468, 0.64],
-  [-0.649, 0.64],
-  [-0.667, 0.613],
-  [-0.667, 0.468],
-  [-0.802, 0.441],
-  [-0.811, 0.18],
-  [-0.865, 0.171],
-  [-0.874, 0.117],
-  [-0.982, 0.108],
-  [-1, 0],
+  [0.0, 0.943],
+  [-0.14, 0.909],
+  [-0.14, 0.84],
+  [-0.23, 0.749],
+  [-0.447, 0.749],
+  [-0.447, 0.635],
+  [-0.478, 0.609],
+  [-0.632, 0.609],
+  [-0.649, 0.558],
+  [-0.632, 0.464],
+  [-0.675, 0.421],
+  [-0.778, 0.421],
+  [-0.778, 0.19],
+  [-0.837, 0.156],
+  [-0.863, 0.105],
+  [-0.906, 0.105],
+  [-0.949, 0.04],
+  [-1.0, 0.0],
 ];
 function _rot90([x, y]) {
   return [-y, x];
@@ -1777,7 +1788,6 @@ loader.load(
 
     barFill.style.width = "100%";
     stageTxt.textContent = "";
-    perfNote.textContent = `${(triCount / 1e3).toFixed(0)}K tri | ${chunks} chunks | BVH: on-demand`;
 
     loadSc.classList.add("hidden");
     entrySc.classList.remove("hidden");
@@ -1808,7 +1818,6 @@ function animate() {
   const dt = clock.getDelta();
   updatePlayer(dt);
   updatePOIs();
-  updateNavArrow();
   if (fc++ % 15 === 0) drawMinimap();
   renderer.render(scene, activeCamera);
 
@@ -1818,9 +1827,7 @@ function animate() {
   if (ft > 0 && ft < 500) avgFps = avgFps * 0.95 + (1000 / ft) * 0.05;
 
   if (fc % 20 === 0) {
-    const col = avgFps < 40 ? "#f59e0b" : avgFps < 55 ? "#10b981" : "#00e676";
-    fpsEl.innerHTML = `FPS:${Math.round(avgFps)} <br>` + `<span style="color:${col};font-size:10px">` + `DC:${renderer.info.render.calls} TRI:${(renderer.info.render.triangles / 1e3).toFixed(0)}K</span>`;
-    if (isSV) posTxt.textContent = `x:${(P.pos.x * 10).toFixed(1)}m z:${(P.pos.z * 10).toFixed(1)}m ${P.onGround ? "🟢" : "🔴"}`;
+    fpsEl.textContent = `FPS: ${Math.round(avgFps)}`;
   }
 }
 animate();

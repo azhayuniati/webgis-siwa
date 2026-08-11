@@ -46,7 +46,7 @@
       <button type="button" class="mbtn" id="btnSV">Street View</button>
       <button type="button" class="mbtn active" id="btnOrbit">Orbit</button>
     </div>
-    <div id="fpsBox">FPS: --<br /><span style="font-size: 10px; color: var(--color-text-muted); opacity: 0.6" id="perfNote">—</span></div>
+    <div id="fpsBox">FPS: --</div>
     <div id="xhair"></div>
     <div id="lockMsg" data-i18n="lockMsg">Klik canvas untuk mengunci mouse</div>
 
@@ -58,7 +58,6 @@
       <div class="irow"><span data-i18n="rowStyle">Gaya</span> <span>Jawa Tengah</span></div>
       <div class="irow"><span data-i18n="rowMaterial">Material</span> <span>Andesit</span></div>
       <div class="irow"><span data-i18n="rowReligion">Agama</span> <span>Hindu Śiwa</span></div>
-      <div id="posTxt">—</div>
     </div>
     <div id="mmBox"><canvas id="mm" width="290" height="290"></canvas></div>
     <div id="hints">
@@ -78,14 +77,10 @@
     <!-- Prompt interaksi saat dekat sebuah titik -->
     <div id="poiPrompt" class="hidden"><span class="poiPromptKey">E</span> <span data-i18n="poiPromptTxt">Lihat informasi</span></div>
 
-    <!-- Panah MAJU: diproyeksikan ke titik di lantai depan pemain tiap frame
-         (lihat updateNavArrow() di main.js) — kesan "nempel di jalan" ala
-         Google Maps walking navigation / Street View chevron. -->
-    <button type="button" id="navFwd" aria-label="Maju">▲</button>
-
-    <!-- Panah MUNDUR: tombol tetap, tidak ikut diproyeksikan -->
-    <div id="navArrows">
-      <button type="button" id="navBack" aria-label="Mundur">▼</button>
+    <!-- Virtual joystick (mobile only) — geser jempol dari tengah buat jalan,
+         arahnya di-map ke K.KeyW/S/A/D yang sama dgn WASD desktop. -->
+    <div id="joystick">
+      <div id="joystickKnob"></div>
     </div>
 
     <!-- Popup detail POI -->
