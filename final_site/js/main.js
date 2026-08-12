@@ -229,6 +229,52 @@ canvas.addEventListener(
   { passive: true },
 );
 
+// ── ORBIT CONTROL (touch/mobile) ─────────────────────────────────
+// Versi sentuh dari drag-rotate di atas — sebelumnya orbit HANYA bisa
+// diputar pakai mouse (mousedown/mousemove), jadi di HP mode Orbit
+// tidak bisa diputar sama sekali (event mouse itu tidak keluar pas
+// drag pakai jari). Logikanya sama persis, cuma sumber koordinatnya
+// dari touch, bukan mouse.
+let orbTouchId = null;
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    if (isSV) return; // orbit only — di SV, touch dipakai buat look-around
+    const t = e.changedTouches[0];
+    orbTouchId = t.identifier;
+    orb.drag = true;
+    orb.lx = t.clientX;
+    orb.ly = t.clientY;
+  },
+  { passive: true },
+);
+canvas.addEventListener(
+  "touchmove",
+  (e) => {
+    if (isSV || !orb.drag) return;
+    let t = null;
+    for (const ct of e.changedTouches) if (ct.identifier === orbTouchId) t = ct;
+    if (!t) return;
+    orb.theta -= (t.clientX - orb.lx) * 0.005;
+    orb.phi = Math.max(0.05, Math.min(Math.PI / 2 - 0.01, orb.phi + (t.clientY - orb.ly) * 0.005));
+    orb.lx = t.clientX;
+    orb.ly = t.clientY;
+    updateOrbit();
+    e.preventDefault();
+  },
+  { passive: false },
+);
+function orbTouchEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === orbTouchId) {
+      orb.drag = false;
+      orbTouchId = null;
+    }
+  }
+}
+canvas.addEventListener("touchend", orbTouchEnd);
+canvas.addEventListener("touchcancel", orbTouchEnd);
+
 // ── PLAYER ───────────────────────────────────────────────────────
 // ── SPAWN DEFAULT: gerbang TIMUR (lihat screenshot referensi) ─────
 // Isi 2 nilai ini dari hasil kalibrasi tombol "1" (lihat langkah di bawah)
@@ -873,15 +919,26 @@ function updatePOIs() {
 // ke K.KeyW/S/A/D yang sama persis dipakai updatePlayer() untuk WASD —
 // jadi 100% konsisten sama gerakan desktop, termasuk gerak diagonal
 // (nahan maju + geser kanan sekaligus, dsb).
+//
+// "Berat": posisi knob TIDAK langsung nempel ke jari (joyTargetX/Y),
+// tapi disusul pelan-pelan tiap frame (joyVisualX/Y, di-lerp lewat
+// joyTick() yang dipanggil dari animate()) — hasilnya kerasa ada
+// "inersia", tidak langsung snappy. Deadzone juga dinaikkan supaya
+// perlu dorongan lebih tegas dulu sebelum karakter mulai jalan.
 const JOY_MAX_R = 42; // radius maksimum jempol boleh geser dari pusat (px)
-const JOY_DEAD = 0.28; // deadzone (0..1) — di bawah ini dianggap diam
+const JOY_DEAD = 0.42; // deadzone (0..1) — dinaikkan dari 0.28, butuh dorongan lebih tegas
+const JOY_EASE = 0.14; // 0..1 — makin KECIL makin "berat"/lambat nyusul, makin besar makin ringan/responsif
 let joyTouchId = null,
   joyCenterX = 0,
-  joyCenterY = 0;
+  joyCenterY = 0,
+  joyTargetX = 0,
+  joyTargetY = 0, // posisi mentah jempol (langsung dari touch)
+  joyVisualX = 0,
+  joyVisualY = 0; // posisi halus hasil lerp — INI yang gerakin knob & tentuin K.Key*
 
 function joyReset() {
-  K.KeyW = K.KeyS = K.KeyA = K.KeyD = false;
-  joystickKnob.style.transform = "translate(-50%, -50%)";
+  joyTargetX = 0;
+  joyTargetY = 0;
 }
 function joyUpdate(clientX, clientY) {
   let dx = clientX - joyCenterX,
@@ -891,9 +948,17 @@ function joyUpdate(clientX, clientY) {
     dx = (dx / dist) * JOY_MAX_R;
     dy = (dy / dist) * JOY_MAX_R;
   }
-  joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  const nx = dx / JOY_MAX_R,
-    ny = dy / JOY_MAX_R; // -1..1
+  joyTargetX = dx;
+  joyTargetY = dy;
+}
+// Dipanggil tiap frame dari animate() — inti dari kesan "berat" itu.
+function joyTick() {
+  if (!isMobile) return;
+  joyVisualX += (joyTargetX - joyVisualX) * JOY_EASE;
+  joyVisualY += (joyTargetY - joyVisualY) * JOY_EASE;
+  joystickKnob.style.transform = `translate(calc(-50% + ${joyVisualX.toFixed(1)}px), calc(-50% + ${joyVisualY.toFixed(1)}px))`;
+  const nx = joyVisualX / JOY_MAX_R,
+    ny = joyVisualY / JOY_MAX_R; // -1..1
   K.KeyW = ny < -JOY_DEAD;
   K.KeyS = ny > JOY_DEAD;
   K.KeyA = nx < -JOY_DEAD;
@@ -1163,6 +1228,7 @@ function exitSV() {
   lockMsg.style.display = "none";
   joystick.style.display = "none";
   joyTouchId = null;
+  joyTargetX = joyTargetY = joyVisualX = joyVisualY = 0; // reset biar tidak nyangkut posisi lama saat SV dibuka lagi
   K.KeyW = false; // pastikan arah yang lagi ditahan tidak "nyangkut" jalan terus
   K.KeyS = false;
   K.KeyA = false;
@@ -1388,7 +1454,8 @@ const MM = 290;
 
 const MM_BG = "#c9c397";
 const MM_PLAN = "#a7a37c";
-const MM_ROOM = "#d8d3ab"; // ← pastikan baris ini ada
+const MM_CORRIDOR = "#5b9bd5"; // koridor — biru, sesuai sketsa
+const MM_ROOM = "#c0504d"; // ruang arca — merah, sesuai sketsa
 const MM_OUTLINE = "#2a2119";
 const MM_DOT = "#1a1410";
 const MM_MARKER = "#c62828";
@@ -1436,9 +1503,13 @@ for (let i = 0; i < 4; i++) {
 }
 
 // ── Ruang arca (kamar) + koridor penghubung ──
-const ROOM_HALF = FW * 0.13; // ukuran ruang arca
-const CORR_HALF = FW * 0.1; // setengah-lebar koridor
-const CENTER_HALF = FW * 0.16; // setengah-ukuran ruang tengah
+// PENTING: posisi & ukuran dihitung dari geometri PLAN_PTS (denah hasil
+// trace gambar) itu sendiri — BUKAN dari koordinat arca asli di dunia 3D
+// (skalanya beda jauh dari skala minimap/FW, itu sebab kenapa versi lama
+// ruang & koridornya "meleyot"/tidak nempel ke bentuk denah).
+const CENTER_HALF = FW * 0.14; // ukuran ruang tengah (Mahadewa)
+const ROOM_HALF = FW * 0.16; // ukuran ruang arca (Durga/Ganesha/Agastya)
+const CORR_HALF = FW * 0.085; // setengah-lebar koridor
 
 function _rectPts(cx, cz, half) {
   return [
@@ -1450,23 +1521,33 @@ function _rectPts(cx, cz, half) {
 }
 const _centerSq = _rectPts(0, 0, CENTER_HALF);
 
+// Jarak puncak lengan Utara/Selatan vs Barat/Timur, diambil LANGSUNG dari
+// _planQuad (titik pertama = puncak Selatan, titik terakhir = puncak Barat)
+// — supaya ruang & koridor PASTI nempel pas di ujung lengan denah asli,
+// berapa pun bentuknya kalau _planQuad di-update lagi nanti.
+const TIP_NS = _planQuad[0][1] * FW;
+const TIP_EW = -_planQuad[_planQuad.length - 1][0] * FW;
+
 // Arah mata angin murni — supaya koridor & kamar SELALU lurus sejajar
-// sumbu (tidak ikut miring oleh selisih kecil posisi arca asli).
+// sumbu (tidak ikut miring/meleyot).
 const DIR_AXIS = {
-  Utara: [0, -1],
-  North: [0, -1],
-  Selatan: [0, 1],
-  South: [0, 1],
-  Barat: [-1, 0],
-  West: [-1, 0],
-  Timur: [1, 0],
-  East: [1, 0],
+  Utara: [0, -1, TIP_NS],
+  North: [0, -1, TIP_NS],
+  Selatan: [0, 1, TIP_NS],
+  South: [0, 1, TIP_NS],
+  Barat: [-1, 0, TIP_EW],
+  West: [-1, 0, TIP_EW],
+  Timur: [1, 0, TIP_EW],
+  East: [1, 0, TIP_EW],
 };
 
 const STATUE_IDS = ["durga", "ganesha", "agastya", "mahadewa"];
 let ROOMS_CACHE = null,
   CORRIDORS_CACHE = null,
   DOTS_CACHE = null;
+
+const ROOM_DIST_FRAC = 0.8; // ruang diletakkan di 80% jarak ke puncak lengan
+const CORR_END_FRAC = 0.97; // koridor lanjut hampir sampai dinding luar
 
 function buildStatueLayout() {
   if (ROOMS_CACHE) return; // hitung sekali saja, lalu simpan di cache
@@ -1476,23 +1557,31 @@ function buildStatueLayout() {
   STATUE_IDS.forEach((id) => {
     const poi = POIS.find((p) => p.id === id);
     if (!poi) return;
-    const x = poi.pos.x,
-      z = poi.pos.z;
-    const rawDist = Math.hypot(x, z);
-    if (rawDist < CENTER_HALF * 1.3) {
-      DOTS_CACHE.push([0, 0]); // Mahadewa — di ruang tengah
+    if (id === "mahadewa") {
+      DOTS_CACHE.push([0, 0]); // Mahadewa selalu di ruang tengah, walau dir-nya "Timur" (arah pintu masuk, bukan lokasi ruang)
       return;
     }
-    const [ux, uz] = DIR_AXIS[poi.dir.id] || DIR_AXIS[poi.dir.en] || [x / rawDist, z / rawDist];
-    const dist = x * ux + z * uz;
-    const rx = ux * dist,
-      rz = uz * dist;
+    const dirKey = poi.dir.id in DIR_AXIS ? poi.dir.id : poi.dir.en;
+    const axis = DIR_AXIS[dirKey];
+    if (!axis) {
+      DOTS_CACHE.push([0, 0]);
+      return;
+    }
+    const [ux, uz, tip] = axis;
+    const roomDist = tip * ROOM_DIST_FRAC;
+    const rx = ux * roomDist,
+      rz = uz * roomDist;
     DOTS_CACHE.push([rx, rz]);
     ROOMS_CACHE.push(_rectPts(rx, rz, ROOM_HALF));
+
+    // Koridor: satu spoke LURUS dari tepi ruang tengah sampai hampir ke
+    // dinding luar (melewati/di belakang kotak ruang arca, jadi biru-nya
+    // tetap kelihatan di kedua sisi ruang — sama seperti di sketsa).
     const x0 = ux * CENTER_HALF,
       z0 = uz * CENTER_HALF;
-    const x1 = rx - ux * ROOM_HALF,
-      z1 = rz - uz * ROOM_HALF;
+    const corrEnd = tip * CORR_END_FRAC;
+    const x1 = ux * corrEnd,
+      z1 = uz * corrEnd;
     const nx = -uz * CORR_HALF,
       nz = ux * CORR_HALF;
     CORRIDORS_CACHE.push([
@@ -1515,7 +1604,7 @@ function drawMinimap() {
   const toMM = (wx, wz) => ({ x: cx + wx * sc, y: cy + wz * sc });
 
   // Denah candi — bingkai luar (gelap) + isian dalam (terang), berlapis
-  function drawPlanLayer(pts, fillColor) {
+  function drawPlanLayer(pts, fillColor, lineW = 1.3) {
     mmCtx.beginPath();
     pts.forEach(([wx, wz], i) => {
       const p = toMM(wx, wz);
@@ -1525,41 +1614,24 @@ function drawMinimap() {
     mmCtx.fillStyle = fillColor;
     mmCtx.fill();
     mmCtx.strokeStyle = MM_OUTLINE;
-    mmCtx.lineWidth = 1.3;
+    mmCtx.lineWidth = lineW;
     mmCtx.stroke();
   }
 
   buildStatueLayout();
 
-  // Denah candi — bentuk luar akurat hasil lacak dari gambar referensi
-  mmCtx.beginPath();
-  PLAN_PTS.forEach(([wx, wz], i) => {
-    const p = toMM(wx, wz);
-    i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
-  });
-  mmCtx.closePath();
-  mmCtx.fillStyle = MM_PLAN;
-  mmCtx.fill();
-  mmCtx.strokeStyle = MM_OUTLINE;
-  mmCtx.lineWidth = 1.3;
-  mmCtx.stroke();
+  // 1) Denah candi — bentuk luar akurat hasil lacak dari gambar referensi
+  drawPlanLayer(PLAN_PTS, MM_PLAN);
 
-  function drawPlanLayer(pts, fillColor) {
-    mmCtx.beginPath();
-    pts.forEach(([wx, wz], i) => {
-      const p = toMM(wx, wz);
-      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
-    });
-    mmCtx.closePath();
-    mmCtx.fillStyle = fillColor;
-    mmCtx.fill();
-    mmCtx.strokeStyle = MM_OUTLINE;
-    mmCtx.lineWidth = 1;
-    mmCtx.stroke();
-  }
-  drawPlanLayer(_centerSq, MM_ROOM);
-  CORRIDORS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM));
-  ROOMS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM));
+  // 2) Koridor (biru) — digambar dulu, termasuk ruang tengah (bagian dari
+  //    jaringan koridor, sama seperti di sketsa), supaya nanti ruang arca
+  //    (merah) bisa "menimpa" di atasnya dan biru tetap kelihatan di kedua
+  //    sisi tiap ruang.
+  CORRIDORS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_CORRIDOR, 1));
+  drawPlanLayer(_centerSq, MM_CORRIDOR, 1);
+
+  // 3) Ruang arca (merah), digambar di atas koridor
+  ROOMS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM, 1));
 
   // Titik arca — posisi asli dari POIS, tanpa nama/label
   mmCtx.fillStyle = MM_DOT;
@@ -1817,6 +1889,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
   updatePlayer(dt);
+  joyTick();
   updatePOIs();
   if (fc++ % 15 === 0) drawMinimap();
   renderer.render(scene, activeCamera);
