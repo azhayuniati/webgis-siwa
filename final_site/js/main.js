@@ -230,16 +230,26 @@ canvas.addEventListener(
 );
 
 // ── ORBIT CONTROL (touch/mobile) ─────────────────────────────────
-// Versi sentuh dari drag-rotate di atas — sebelumnya orbit HANYA bisa
-// diputar pakai mouse (mousedown/mousemove), jadi di HP mode Orbit
-// tidak bisa diputar sama sekali (event mouse itu tidak keluar pas
-// drag pakai jari). Logikanya sama persis, cuma sumber koordinatnya
-// dari touch, bukan mouse.
+// Versi sentuh dari drag-rotate + wheel-zoom di atas — sebelumnya orbit
+// HANYA bisa diputar & di-zoom pakai mouse (mousedown/mousemove/wheel),
+// jadi di HP mode Orbit tidak bisa diputar ATAU di-zoom sama sekali
+// (event mouse & wheel itu tidak keluar pas disentuh pakai jari).
+// Satu jari = putar (sama seperti drag mouse). Dua jari (pinch) = zoom.
 let orbTouchId = null;
+let pinchDist = null; // jarak antar 2 jari saat pinch, null = tidak sedang pinch
+function _touchDist(t0, t1) {
+  return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+}
 canvas.addEventListener(
   "touchstart",
   (e) => {
     if (isSV) return; // orbit only — di SV, touch dipakai buat look-around
+    if (e.touches.length >= 2) {
+      // 2 jari turun → mulai pinch-zoom, batalkan drag-rotate 1 jari
+      orb.drag = false;
+      pinchDist = _touchDist(e.touches[0], e.touches[1]);
+      return;
+    }
     const t = e.changedTouches[0];
     orbTouchId = t.identifier;
     orb.drag = true;
@@ -251,7 +261,20 @@ canvas.addEventListener(
 canvas.addEventListener(
   "touchmove",
   (e) => {
-    if (isSV || !orb.drag) return;
+    if (isSV) return;
+    if (e.touches.length >= 2) {
+      // Pinch-zoom: jarak mengecil (cubit) → mendekat (zoom in), jarak
+      // membesar (regangkan) → menjauh (zoom out) — arah dibalik dari deltaY.
+      const d = _touchDist(e.touches[0], e.touches[1]);
+      if (pinchDist !== null) {
+        orb.r = Math.max(2, Math.min(80, orb.r - (d - pinchDist) * 0.04));
+        updateOrbit();
+      }
+      pinchDist = d;
+      e.preventDefault();
+      return;
+    }
+    if (!orb.drag) return;
     let t = null;
     for (const ct of e.changedTouches) if (ct.identifier === orbTouchId) t = ct;
     if (!t) return;
@@ -265,6 +288,7 @@ canvas.addEventListener(
   { passive: false },
 );
 function orbTouchEnd(e) {
+  if (e.touches.length < 2) pinchDist = null;
   for (const t of e.changedTouches) {
     if (t.identifier === orbTouchId) {
       orb.drag = false;
@@ -1468,39 +1492,61 @@ const MARKER_MAX_R = MM / 2 - 14; // batas jarak penanda pemain dari pusat, biar
 // terasa kurang pas.
 const FW = 2.5;
 
-// Satu "lengan" denah (dari puncak Selatan ke puncak Barat), dilacak
-// SECARA OTOMATIS dari piksel gambar referensi (contour detection,
-// bukan tebakan manual) — lalu dinormalisasi ke rentang -1..1 dan
-// digandakan 4x via rotasi 90° supaya hasil akhirnya simetris sempurna.
+// Satu "lengan" denah (dari puncak Barat ke puncak Selatan), dilacak
+// SECARA OTOMATIS dari piksel gambar referensi (contour detection),
+// lalu di-RECTILINEARIZE (dipaksa semua sudut siku-siku murni, tidak
+// ada segmen diagonal sama sekali — inilah yang bikin versi sebelumnya
+// kelihatan "menceng") — lalu digandakan 4x via rotasi 90° supaya hasil
+// akhirnya simetris sempurna.
 const _planQuad = [
-  [0.0, 0.943],
-  [-0.14, 0.909],
-  [-0.14, 0.84],
-  [-0.23, 0.749],
-  [-0.447, 0.749],
-  [-0.447, 0.635],
-  [-0.478, 0.609],
-  [-0.632, 0.609],
-  [-0.649, 0.558],
-  [-0.632, 0.464],
-  [-0.675, 0.421],
-  [-0.778, 0.421],
-  [-0.778, 0.19],
-  [-0.837, 0.156],
-  [-0.863, 0.105],
-  [-0.906, 0.105],
-  [-0.949, 0.04],
   [-1.0, 0.0],
+  [-0.957, 0.0],
+  [-0.957, 0.036],
+  [-0.906, 0.036],
+  [-0.906, 0.105],
+  [-0.837, 0.105],
+  [-0.837, 0.19],
+  [-0.778, 0.19],
+  [-0.778, 0.43],
+  [-0.641, 0.43],
+  [-0.641, 0.558],
+  [-0.624, 0.558],
+  [-0.624, 0.609],
+  [-0.453, 0.609],
+  [-0.453, 0.755],
+  [-0.145, 0.755],
+  [-0.145, 0.909],
+  [-0.102, 0.909],
+  [-0.102, 0.943],
+  [0.0, 0.943],
 ];
 function _rot90([x, y]) {
   return [-y, x];
 }
-const PLAN_PTS = [];
-let _q = _planQuad;
-for (let i = 0; i < 4; i++) {
-  PLAN_PTS.push(..._q.map(([x, y]) => [x * FW, y * FW]));
-  _q = _q.map(_rot90);
+// Reusable: gandakan _planQuad 4x (rotasi 90°) dengan skala tertentu.
+// scale=1 → dinding luar asli. scale<1 → salinan lebih kecil, dipakai
+// buat ring galeri (koridor keliling) — bentuknya SAMA PERSIS dengan
+// dinding luar, cuma diperkecil, jadi otomatis ikut simetris & lurus.
+function _buildLoop(scale) {
+  const out = [];
+  let q = _planQuad.map(([x, y]) => [x * scale, y * scale]);
+  for (let i = 0; i < 4; i++) {
+    out.push(...q.map(([x, y]) => [x * FW, y * FW]));
+    q = q.map(_rot90);
+  }
+  return out;
 }
+const PLAN_PTS = _buildLoop(1);
+
+// Ring galeri (koridor keliling) — sketsa referensi menunjukkan ada
+// jalur koridor yang mengelilingi seluruh badan candi (bukan cuma 4
+// spoke lurus dari tengah), jadi digambar sebagai "bingkai foto":
+// bentuk luar (RING_OUTER) dikurangi bentuk dalam (RING_INNER), sama
+// persis seperti dinding luar cuma diperkecil.
+const RING_OUTER_SCALE = 0.62;
+const RING_INNER_SCALE = 0.46;
+const RING_OUTER_PTS = _buildLoop(RING_OUTER_SCALE);
+const RING_INNER_PTS = _buildLoop(RING_INNER_SCALE);
 
 // ── Ruang arca (kamar) + koridor penghubung ──
 // PENTING: posisi & ukuran dihitung dari geometri PLAN_PTS (denah hasil
@@ -1508,8 +1554,8 @@ for (let i = 0; i < 4; i++) {
 // (skalanya beda jauh dari skala minimap/FW, itu sebab kenapa versi lama
 // ruang & koridornya "meleyot"/tidak nempel ke bentuk denah).
 const CENTER_HALF = FW * 0.14; // ukuran ruang tengah (Mahadewa)
-const ROOM_HALF = FW * 0.16; // ukuran ruang arca (Durga/Ganesha/Agastya)
-const CORR_HALF = FW * 0.085; // setengah-lebar koridor
+const ROOM_HALF = FW * 0.155; // ukuran ruang arca (Durga/Ganesha/Agastya)
+const CORR_HALF = FW * 0.075; // setengah-lebar koridor/spoke
 
 function _rectPts(cx, cz, half) {
   return [
@@ -1522,11 +1568,11 @@ function _rectPts(cx, cz, half) {
 const _centerSq = _rectPts(0, 0, CENTER_HALF);
 
 // Jarak puncak lengan Utara/Selatan vs Barat/Timur, diambil LANGSUNG dari
-// _planQuad (titik pertama = puncak Selatan, titik terakhir = puncak Barat)
-// — supaya ruang & koridor PASTI nempel pas di ujung lengan denah asli,
+// _planQuad (titik pertama = puncak Barat, titik terakhir = puncak Selatan)
+// — supaya ruang & ring PASTI nempel pas di ujung lengan denah asli,
 // berapa pun bentuknya kalau _planQuad di-update lagi nanti.
-const TIP_NS = _planQuad[0][1] * FW;
-const TIP_EW = -_planQuad[_planQuad.length - 1][0] * FW;
+const TIP_EW = -_planQuad[0][0] * FW;
+const TIP_NS = _planQuad[_planQuad.length - 1][1] * FW;
 
 // Arah mata angin murni — supaya koridor & kamar SELALU lurus sejajar
 // sumbu (tidak ikut miring/meleyot).
@@ -1543,16 +1589,20 @@ const DIR_AXIS = {
 
 const STATUE_IDS = ["durga", "ganesha", "agastya", "mahadewa"];
 let ROOMS_CACHE = null,
-  CORRIDORS_CACHE = null,
+  SPOKES_CACHE = null,
   DOTS_CACHE = null;
 
-const ROOM_DIST_FRAC = 0.8; // ruang diletakkan di 80% jarak ke puncak lengan
-const CORR_END_FRAC = 0.97; // koridor lanjut hampir sampai dinding luar
+// Ruang arca diletakkan di tengah-tengah ketebalan ring galeri (rata-rata
+// RING_OUTER_SCALE & RING_INNER_SCALE) — persis seperti di sketsa, di mana
+// ruang arca "duduk" di dalam jalur galeri, bukan jauh terpisah dari ring.
+const ROOM_DIST_FRAC = (RING_OUTER_SCALE + RING_INNER_SCALE) / 2;
+// Spoke (jalur dari ruang tengah ke ring) berhenti pas di RING_INNER_SCALE.
+const SPOKE_END_FRAC = RING_INNER_SCALE;
 
 function buildStatueLayout() {
   if (ROOMS_CACHE) return; // hitung sekali saja, lalu simpan di cache
   ROOMS_CACHE = [];
-  CORRIDORS_CACHE = [];
+  SPOKES_CACHE = [];
   DOTS_CACHE = [];
   STATUE_IDS.forEach((id) => {
     const poi = POIS.find((p) => p.id === id);
@@ -1574,17 +1624,17 @@ function buildStatueLayout() {
     DOTS_CACHE.push([rx, rz]);
     ROOMS_CACHE.push(_rectPts(rx, rz, ROOM_HALF));
 
-    // Koridor: satu spoke LURUS dari tepi ruang tengah sampai hampir ke
-    // dinding luar (melewati/di belakang kotak ruang arca, jadi biru-nya
-    // tetap kelihatan di kedua sisi ruang — sama seperti di sketsa).
+    // Spoke: jalur LURUS dari tepi ruang tengah sampai ke ring galeri
+    // (bagian dalam ring), lewat di belakang kotak ruang arca — jadi
+    // biru-nya tetap kelihatan di kedua sisi ruang, sama seperti sketsa.
     const x0 = ux * CENTER_HALF,
       z0 = uz * CENTER_HALF;
-    const corrEnd = tip * CORR_END_FRAC;
-    const x1 = ux * corrEnd,
-      z1 = uz * corrEnd;
+    const spokeEnd = tip * SPOKE_END_FRAC;
+    const x1 = ux * spokeEnd,
+      z1 = uz * spokeEnd;
     const nx = -uz * CORR_HALF,
       nz = ux * CORR_HALF;
-    CORRIDORS_CACHE.push([
+    SPOKES_CACHE.push([
       [x0 + nx, z0 + nz],
       [x1 + nx, z1 + nz],
       [x1 - nx, z1 - nz],
@@ -1623,14 +1673,36 @@ function drawMinimap() {
   // 1) Denah candi — bentuk luar akurat hasil lacak dari gambar referensi
   drawPlanLayer(PLAN_PTS, MM_PLAN);
 
-  // 2) Koridor (biru) — digambar dulu, termasuk ruang tengah (bagian dari
-  //    jaringan koridor, sama seperti di sketsa), supaya nanti ruang arca
-  //    (merah) bisa "menimpa" di atasnya dan biru tetap kelihatan di kedua
-  //    sisi tiap ruang.
-  CORRIDORS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_CORRIDOR, 1));
+  // 2) Ring galeri (koridor keliling, biru) — digambar sebagai "bingkai foto":
+  //    path luar + path dalam dengan arah gambar BERLAWANAN, di-fill pakai
+  //    aturan evenodd supaya bagian tengahnya berlubang (jadi bentuk ring).
+  mmCtx.beginPath();
+  RING_OUTER_PTS.forEach(([wx, wz], i) => {
+    const p = toMM(wx, wz);
+    i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+  });
+  mmCtx.closePath();
+  // inner path digambar mundur (reverse) — bikin winding-nya berlawanan,
+  // supaya "evenodd" benar-benar melubangi bagian dalam.
+  [...RING_INNER_PTS]
+    .reverse()
+    .forEach(([wx, wz], i) => {
+      const p = toMM(wx, wz);
+      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+    });
+  mmCtx.closePath();
+  mmCtx.fillStyle = MM_CORRIDOR;
+  mmCtx.fill("evenodd");
+  mmCtx.strokeStyle = MM_OUTLINE;
+  mmCtx.lineWidth = 1;
+  mmCtx.stroke();
+
+  // 3) Spoke (biru) dari ruang tengah ke ring, + ruang tengah itu sendiri
+  //    (bagian dari jaringan koridor, sama seperti di sketsa)
+  SPOKES_CACHE.forEach((pts) => drawPlanLayer(pts, MM_CORRIDOR, 1));
   drawPlanLayer(_centerSq, MM_CORRIDOR, 1);
 
-  // 3) Ruang arca (merah), digambar di atas koridor
+  // 4) Ruang arca (merah), digambar di atas koridor
   ROOMS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM, 1));
 
   // Titik arca — posisi asli dari POIS, tanpa nama/label
