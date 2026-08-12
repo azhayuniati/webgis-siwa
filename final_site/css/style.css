@@ -417,6 +417,54 @@ body {
    dengan flag isMobile yang dipakai buat pixel ratio & touch control).
    Desktop TIDAK kena apa pun di bawah ini.
    ══════════════════════════════════════════════════════════════════ */
+
+/* Load screen & entry (home) screen — h1/h2 aslinya 120px, didesain buat
+   layar lebar. Di HP itu jelas kegedean (beberapa huruf saja sudah
+   memenuhi lebar layar), jadi diperkecil drastis + elemen lain
+   dirapikan biar muat di layar sempit. */
+.is-mobile #loadScreen h1,
+.is-mobile #entryScreen h2 {
+  font-size: 44px;
+  letter-spacing: -1px;
+}
+.is-mobile .icon img {
+  width: 52px;
+  height: 52px;
+}
+.is-mobile .sub {
+  font-size: 12px;
+  letter-spacing: 0.8px;
+}
+.is-mobile #barWrap {
+  width: min(260px, 70vw);
+}
+.is-mobile #barTxt {
+  font-size: 13px;
+}
+.is-mobile #stageTxt {
+  font-size: 10px;
+}
+.is-mobile #errBox {
+  width: min(340px, 82vw);
+  font-size: 11px;
+}
+.is-mobile #entryScreen p {
+  font-size: 13px;
+}
+.is-mobile #entryScreen .note {
+  font-size: 10px;
+  text-align: center;
+  padding: 0 var(--space-4);
+}
+.is-mobile #enterBtn {
+  padding: 12px 32px;
+  font-size: 13px;
+}
+.is-mobile #entryLangSwitch .langBtn {
+  font-size: 11px;
+  padding: 6px 12px;
+}
+
 .is-mobile #topbar {
   flex-wrap: wrap;
   gap: var(--space-2);

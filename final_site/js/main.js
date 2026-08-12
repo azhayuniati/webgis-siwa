@@ -1543,8 +1543,8 @@ const PLAN_PTS = _buildLoop(1);
 // spoke lurus dari tengah), jadi digambar sebagai "bingkai foto":
 // bentuk luar (RING_OUTER) dikurangi bentuk dalam (RING_INNER), sama
 // persis seperti dinding luar cuma diperkecil.
-const RING_OUTER_SCALE = 0.62;
-const RING_INNER_SCALE = 0.46;
+const RING_OUTER_SCALE = 0.9;
+const RING_INNER_SCALE = 0.8;
 const RING_OUTER_PTS = _buildLoop(RING_OUTER_SCALE);
 const RING_INNER_PTS = _buildLoop(RING_INNER_SCALE);
 
@@ -1554,8 +1554,8 @@ const RING_INNER_PTS = _buildLoop(RING_INNER_SCALE);
 // (skalanya beda jauh dari skala minimap/FW, itu sebab kenapa versi lama
 // ruang & koridornya "meleyot"/tidak nempel ke bentuk denah).
 const CENTER_HALF = FW * 0.14; // ukuran ruang tengah (Mahadewa)
-const ROOM_HALF = FW * 0.155; // ukuran ruang arca (Durga/Ganesha/Agastya)
-const CORR_HALF = FW * 0.075; // setengah-lebar koridor/spoke
+const ROOM_HALF = FW * 0.13; // ukuran ruang arca (Durga/Ganesha/Agastya)
+const CORR_HALF = FW * 0.055; // setengah-lebar koridor/spoke
 
 function _rectPts(cx, cz, half) {
   return [
@@ -1592,11 +1592,14 @@ let ROOMS_CACHE = null,
   SPOKES_CACHE = null,
   DOTS_CACHE = null;
 
-// Ruang arca diletakkan di tengah-tengah ketebalan ring galeri (rata-rata
-// RING_OUTER_SCALE & RING_INNER_SCALE) — persis seperti di sketsa, di mana
-// ruang arca "duduk" di dalam jalur galeri, bukan jauh terpisah dari ring.
-const ROOM_DIST_FRAC = (RING_OUTER_SCALE + RING_INNER_SCALE) / 2;
-// Spoke (jalur dari ruang tengah ke ring) berhenti pas di RING_INNER_SCALE.
+// PENTING (koreksi dari sketsa): ruang arca Durga/Ganesha/Agastya itu
+// posisinya menempel LANGSUNG ke ruang tengah (Mahadewa) — bukan jauh di
+// ujung lengan dekat ring galeri. Ring galeri (di dekat dinding luar)
+// cuma jalur sirkulasi keliling, ruang-ruang arcanya sendiri semua
+// mengelompok di badan tengah candi.
+const ROOM_DIST = CENTER_HALF + ROOM_HALF; // nempel pas di sebelah ruang tengah, tanpa celah
+// Spoke (jalur dari ruang tengah ke ring galeri) tetap diteruskan sampai
+// ke ring — supaya tiap ruang tetap ada jalur ke gerbang luar.
 const SPOKE_END_FRAC = RING_INNER_SCALE;
 
 function buildStatueLayout() {
@@ -1618,15 +1621,14 @@ function buildStatueLayout() {
       return;
     }
     const [ux, uz, tip] = axis;
-    const roomDist = tip * ROOM_DIST_FRAC;
-    const rx = ux * roomDist,
-      rz = uz * roomDist;
+    const rx = ux * ROOM_DIST,
+      rz = uz * ROOM_DIST;
     DOTS_CACHE.push([rx, rz]);
     ROOMS_CACHE.push(_rectPts(rx, rz, ROOM_HALF));
 
-    // Spoke: jalur LURUS dari tepi ruang tengah sampai ke ring galeri
-    // (bagian dalam ring), lewat di belakang kotak ruang arca — jadi
-    // biru-nya tetap kelihatan di kedua sisi ruang, sama seperti sketsa.
+    // Spoke: jalur LURUS dari tepi ruang tengah, lewat di belakang ruang
+    // arca (biar biru tetap kelihatan di kedua sisinya), terus sampai ke
+    // ring galeri dekat dinding luar.
     const x0 = ux * CENTER_HALF,
       z0 = uz * CENTER_HALF;
     const spokeEnd = tip * SPOKE_END_FRAC;
