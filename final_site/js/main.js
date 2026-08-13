@@ -1593,11 +1593,11 @@ let ROOMS_CACHE = null,
   DOTS_CACHE = null;
 
 // PENTING (koreksi dari sketsa): ruang arca Durga/Ganesha/Agastya itu
-// posisinya menempel LANGSUNG ke ruang tengah (Mahadewa) — bukan jauh di
-// ujung lengan dekat ring galeri. Ring galeri (di dekat dinding luar)
-// cuma jalur sirkulasi keliling, ruang-ruang arcanya sendiri semua
-// mengelompok di badan tengah candi.
-const ROOM_DIST = CENTER_HALF + ROOM_HALF; // nempel pas di sebelah ruang tengah, tanpa celah
+// TIDAK menempel langsung ke ruang tengah — ada celah/koridor pendek di
+// antaranya (jelas kelihatan di sketsa: garis biru mengisi celah itu,
+// bukan ruang arca yang langsung dempet ke ruang Siwa).
+const ROOM_GAP = FW * 0.09; // panjang celah/koridor pendek antara ruang tengah & ruang arca
+const ROOM_DIST = CENTER_HALF + ROOM_GAP + ROOM_HALF; // ruang arca digeser keluar sejauh celah ini
 // Spoke (jalur dari ruang tengah ke ring galeri) tetap diteruskan sampai
 // ke ring — supaya tiap ruang tetap ada jalur ke gerbang luar.
 const SPOKE_END_FRAC = RING_INNER_SCALE;
