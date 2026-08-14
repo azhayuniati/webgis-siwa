@@ -389,7 +389,7 @@ const POIS = [
     dir: { id: "Timur", en: "East" },
     pos: new THREE.Vector3(-0.051, 0.999, -0.039),
     radius: 0.35,
-    img: "./assets/poi/siwa.jpg",
+    img: "./assets/poi/siwa.JPG",
     audio: {
       id: "./assets/audio/mahadewa_id.mp3",
       en: "./assets/audio/mahadewa_en.mp3",
@@ -405,7 +405,7 @@ const POIS = [
     dir: { id: "Selatan", en: "South" },
     pos: new THREE.Vector3(-0.038, 0.934, 0.605),
     radius: 0.35,
-    img: "./assets/poi/agastya.jpg",
+    img: "./assets/poi/agastya.JPG",
     audio: {
       id: "./assets/audio/agastya_id.mp3",
       en: "./assets/audio/agastya_en.mp3",
@@ -421,7 +421,7 @@ const POIS = [
     dir: { id: "Barat", en: "West" },
     pos: new THREE.Vector3(-0.672, 0.947, -0.005),
     radius: 0.35,
-    img: "./assets/poi/ganesha.jpg",
+    img: "./assets/poi/ganesha.JPG",
     audio: {
       id: "./assets/audio/ganesha_id.mp3",
       en: "./assets/audio/ganesha_en.mp3",
@@ -437,7 +437,7 @@ const POIS = [
     dir: { id: "Utara", en: "North" },
     pos: new THREE.Vector3(-0.035, 0.939, -0.614),
     radius: 0.35,
-    img: "./assets/poi/durga.jpg",
+    img: "./assets/poi/durga.JPG",
     audio: {
       id: "./assets/audio/durga_id.mp3",
       en: "./assets/audio/durga_en.mp3",
