@@ -547,6 +547,31 @@ body {
   margin: -13px 0 0 -13px;
 }
 
+/* Popup deskripsi arca: di desktop lebar 380px + gambar rasio 1:1 pas,
+   tapi di HP kegedean (gambar kotak penuh makan banyak layar). Diperkecil
+   + gambar dipepatkan (bukan 1:1 lagi) + teks dirapetin, dan dikasih
+   max-height + scroll jaga-jaga kalau deskripsinya panjang. */
+.is-mobile #poiCard {
+  width: 280px;
+  max-width: 82vw;
+  max-height: 78vh;
+  overflow-y: auto;
+}
+.is-mobile #poiImgFrame {
+  aspect-ratio: 4 / 3;
+}
+.is-mobile #poiBody {
+  padding: 14px 16px 16px;
+}
+.is-mobile #poiTitle {
+  font-size: 19px;
+  margin-bottom: var(--space-2);
+}
+.is-mobile #poiDesc {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 #xhair {
   position: absolute;
   top: 50%;

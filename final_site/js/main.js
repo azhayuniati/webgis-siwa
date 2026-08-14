@@ -348,22 +348,22 @@ document.addEventListener("keydown", (e) => {
   if (!isSV) return;
   if (e.code === "Digit1") {
     _calOrigin = P.pos.clone();
-    console.log(`✅ ORIGIN (gerbang timur): pos=(${P.pos.x.toFixed(3)}, ${P.pos.y.toFixed(3)}, ${P.pos.z.toFixed(3)})  yaw=${P.yaw.toFixed(3)}`);
+    console.log(`ORIGIN (gerbang timur): pos=(${P.pos.x.toFixed(3)}, ${P.pos.y.toFixed(3)}, ${P.pos.z.toFixed(3)})  yaw=${P.yaw.toFixed(3)}`);
   }
   if (e.code === "Digit2") {
     _calForward = P.pos.clone();
-    console.log("✅ FORWARD (arah pusat):", _calForward);
+    console.log("FORWARD (arah pusat):", _calForward);
   }
 
   const names = { Digit3: "mahadewa", Digit4: "agastya", Digit5: "ganesha", Digit6: "durga" };
   if (names[e.code]) {
     const f = _calFrame();
     if (!f) {
-      console.warn("⚠️ Set origin (1) & forward (2) dulu.");
+      console.warn("Set origin (1) & forward (2) dulu.");
       return;
     }
     const rel = P.pos.clone().sub(_calOrigin);
-    console.log(`📍 ${names[e.code]} → local: right=${rel.dot(f.right).toFixed(3)} forward=${rel.dot(f.fwd).toFixed(3)} up=${rel.y.toFixed(3)}`);
+    console.log(`${names[e.code]} → local: right=${rel.dot(f.right).toFixed(3)} forward=${rel.dot(f.fwd).toFixed(3)} up=${rel.y.toFixed(3)}`);
   }
 });
 
@@ -1000,7 +1000,7 @@ joystick.addEventListener(
     joyUpdate(t.clientX, t.clientY);
     e.preventDefault();
   },
-  { passive: false }
+  { passive: false },
 );
 joystick.addEventListener(
   "touchmove",
@@ -1010,7 +1010,7 @@ joystick.addEventListener(
     }
     e.preventDefault();
   },
-  { passive: false }
+  { passive: false },
 );
 function joyEnd(e) {
   for (const t of e.changedTouches) {
@@ -1159,7 +1159,7 @@ canvas.addEventListener(
     lastTouchX = t.clientX;
     lastTouchY = t.clientY;
   },
-  { passive: true }
+  { passive: true },
 );
 canvas.addEventListener(
   "touchmove",
@@ -1176,7 +1176,7 @@ canvas.addEventListener(
     P.pitch = Math.max(-1.3, Math.min(1.3, P.pitch - dy * 0.0032));
     e.preventDefault(); // cegah halaman ikut ke-scroll pas drag
   },
-  { passive: false }
+  { passive: false },
 );
 canvas.addEventListener(
   "touchend",
@@ -1185,7 +1185,7 @@ canvas.addEventListener(
     for (const t of e.touches) if (t.identifier === touchLookId) stillDown = true;
     if (!stillDown) touchLookId = null;
   },
-  { passive: true }
+  { passive: true },
 );
 
 // ── TAP UNTUK BUKA INFO POI (mobile) ─────────────────────────────
@@ -1230,6 +1230,7 @@ function enterSV() {
   } else {
     lockMsg.style.display = "block";
     document.getElementById("hints").style.display = "";
+    document.getElementById("hints").style.left = "var(--space-5)"; // info card lagi hidden di SV, aman geser ke pojok asli
   }
   entrySc.classList.add("hidden");
   // Street-view render settings: lower pixel ratio + tight fog = fewer fragments
@@ -1248,6 +1249,7 @@ function exitSV() {
   btnOrb.classList.add("active");
   btnSV.classList.remove("active");
   infoBox.style.display = ""; // tampilkan lagi di mode Orbit
+  document.getElementById("hints").style.left = ""; // balik ke slot sebelah info card biar tidak tabrakan
   xhair.style.display = "none";
   lockMsg.style.display = "none";
   joystick.style.display = "none";
@@ -1472,281 +1474,181 @@ function updatePlayer(dt) {
   fpsCam.rotation.x = P.pitch;
 }
 
-// ── MINIMAP ──────────────────────────────────────────────────────
-const mmCtx = document.getElementById("mm").getContext("2d");
-const MM = 290;
-
-const MM_BG = "#c9c397";
-const MM_PLAN = "#a7a37c";
-const MM_CORRIDOR = "#5b9bd5"; // koridor — biru, sesuai sketsa
-const MM_ROOM = "#c0504d"; // ruang arca — merah, sesuai sketsa
-const MM_OUTLINE = "#2a2119";
-const MM_DOT = "#1a1410";
-const MM_MARKER = "#c62828";
-
-// Setengah-jangkauan tampilan minimap, satuan dunia (1 unit = 10 m).
-const VIEW_HALF = 2.9;
-const MARKER_MAX_R = MM / 2 - 14; // batas jarak penanda pemain dari pusat, biar tidak hilang keluar kotak
-
-// Setengah-lebar denah (unit dunia). Naikkan/turunkan kalau ukuran
-// terasa kurang pas.
-const FW = 2.5;
-
-// Satu "lengan" denah (dari puncak Barat ke puncak Selatan), dilacak
-// SECARA OTOMATIS dari piksel gambar referensi (contour detection),
-// lalu di-RECTILINEARIZE (dipaksa semua sudut siku-siku murni, tidak
-// ada segmen diagonal sama sekali — inilah yang bikin versi sebelumnya
-// kelihatan "menceng") — lalu digandakan 4x via rotasi 90° supaya hasil
-// akhirnya simetris sempurna.
-const _planQuad = [
-  [-1.0, 0.0],
-  [-0.957, 0.0],
-  [-0.957, 0.036],
-  [-0.906, 0.036],
-  [-0.906, 0.105],
-  [-0.837, 0.105],
-  [-0.837, 0.19],
-  [-0.778, 0.19],
-  [-0.778, 0.43],
-  [-0.641, 0.43],
-  [-0.641, 0.558],
-  [-0.624, 0.558],
-  [-0.624, 0.609],
-  [-0.453, 0.609],
-  [-0.453, 0.755],
-  [-0.145, 0.755],
-  [-0.145, 0.909],
-  [-0.102, 0.909],
-  [-0.102, 0.943],
-  [0.0, 0.943],
-];
-function _rot90([x, y]) {
-  return [-y, x];
-}
-// Reusable: gandakan _planQuad 4x (rotasi 90°) dengan skala tertentu.
-// scale=1 → dinding luar asli. scale<1 → salinan lebih kecil, dipakai
-// buat ring galeri (koridor keliling) — bentuknya SAMA PERSIS dengan
-// dinding luar, cuma diperkecil, jadi otomatis ikut simetris & lurus.
-function _buildLoop(scale) {
-  const out = [];
-  let q = _planQuad.map(([x, y]) => [x * scale, y * scale]);
-  for (let i = 0; i < 4; i++) {
-    out.push(...q.map(([x, y]) => [x * FW, y * FW]));
-    q = q.map(_rot90);
-  }
-  return out;
-}
-const PLAN_PTS = _buildLoop(1);
-
-// Ring galeri (koridor keliling) — sketsa referensi menunjukkan ada
-// jalur koridor yang mengelilingi seluruh badan candi (bukan cuma 4
-// spoke lurus dari tengah), jadi digambar sebagai "bingkai foto":
-// bentuk luar (RING_OUTER) dikurangi bentuk dalam (RING_INNER), sama
-// persis seperti dinding luar cuma diperkecil.
-const RING_OUTER_SCALE = 0.9;
-const RING_INNER_SCALE = 0.8;
-const RING_OUTER_PTS = _buildLoop(RING_OUTER_SCALE);
-const RING_INNER_PTS = _buildLoop(RING_INNER_SCALE);
-
-// ── Ruang arca (kamar) + koridor penghubung ──
-// PENTING: posisi & ukuran dihitung dari geometri PLAN_PTS (denah hasil
-// trace gambar) itu sendiri — BUKAN dari koordinat arca asli di dunia 3D
-// (skalanya beda jauh dari skala minimap/FW, itu sebab kenapa versi lama
-// ruang & koridornya "meleyot"/tidak nempel ke bentuk denah).
-const CENTER_HALF = FW * 0.14; // ukuran ruang tengah (Mahadewa)
-const ROOM_HALF = FW * 0.13; // ukuran ruang arca (Durga/Ganesha/Agastya)
-const CORR_HALF = FW * 0.055; // setengah-lebar koridor/spoke
-
-function _rectPts(cx, cz, half) {
-  return [
-    [cx - half, cz - half],
-    [cx + half, cz - half],
-    [cx + half, cz + half],
-    [cx - half, cz + half],
-  ];
-}
-const _centerSq = _rectPts(0, 0, CENTER_HALF);
-
-// Jarak puncak lengan Utara/Selatan vs Barat/Timur, diambil LANGSUNG dari
-// _planQuad (titik pertama = puncak Barat, titik terakhir = puncak Selatan)
-// — supaya ruang & ring PASTI nempel pas di ujung lengan denah asli,
-// berapa pun bentuknya kalau _planQuad di-update lagi nanti.
-const TIP_EW = -_planQuad[0][0] * FW;
-const TIP_NS = _planQuad[_planQuad.length - 1][1] * FW;
-
-// Arah mata angin murni — supaya koridor & kamar SELALU lurus sejajar
-// sumbu (tidak ikut miring/meleyot).
-const DIR_AXIS = {
-  Utara: [0, -1, TIP_NS],
-  North: [0, -1, TIP_NS],
-  Selatan: [0, 1, TIP_NS],
-  South: [0, 1, TIP_NS],
-  Barat: [-1, 0, TIP_EW],
-  West: [-1, 0, TIP_EW],
-  Timur: [1, 0, TIP_EW],
-  East: [1, 0, TIP_EW],
-};
-
-const STATUE_IDS = ["durga", "ganesha", "agastya", "mahadewa"];
-let ROOMS_CACHE = null,
-  SPOKES_CACHE = null,
-  DOTS_CACHE = null;
-
-// PENTING (koreksi dari sketsa): ruang arca Durga/Ganesha/Agastya itu
-// TIDAK menempel langsung ke ruang tengah — ada celah/koridor pendek di
-// antaranya (jelas kelihatan di sketsa: garis biru mengisi celah itu,
-// bukan ruang arca yang langsung dempet ke ruang Siwa).
-const ROOM_GAP = FW * 0.09; // panjang celah/koridor pendek antara ruang tengah & ruang arca
-const ROOM_DIST = CENTER_HALF + ROOM_GAP + ROOM_HALF; // ruang arca digeser keluar sejauh celah ini
-// Spoke (jalur dari ruang tengah ke ring galeri) tetap diteruskan sampai
-// ke ring — supaya tiap ruang tetap ada jalur ke gerbang luar.
-const SPOKE_END_FRAC = RING_INNER_SCALE;
-
-function buildStatueLayout() {
-  if (ROOMS_CACHE) return; // hitung sekali saja, lalu simpan di cache
-  ROOMS_CACHE = [];
-  SPOKES_CACHE = [];
-  DOTS_CACHE = [];
-  STATUE_IDS.forEach((id) => {
-    const poi = POIS.find((p) => p.id === id);
-    if (!poi) return;
-    if (id === "mahadewa") {
-      DOTS_CACHE.push([0, 0]); // Mahadewa selalu di ruang tengah, walau dir-nya "Timur" (arah pintu masuk, bukan lokasi ruang)
-      return;
-    }
-    const dirKey = poi.dir.id in DIR_AXIS ? poi.dir.id : poi.dir.en;
-    const axis = DIR_AXIS[dirKey];
-    if (!axis) {
-      DOTS_CACHE.push([0, 0]);
-      return;
-    }
-    const [ux, uz, tip] = axis;
-    const rx = ux * ROOM_DIST,
-      rz = uz * ROOM_DIST;
-    DOTS_CACHE.push([rx, rz]);
-    ROOMS_CACHE.push(_rectPts(rx, rz, ROOM_HALF));
-
-    // Spoke: jalur LURUS dari tepi ruang tengah, lewat di belakang ruang
-    // arca (biar biru tetap kelihatan di kedua sisinya), terus sampai ke
-    // ring galeri dekat dinding luar.
-    const x0 = ux * CENTER_HALF,
-      z0 = uz * CENTER_HALF;
-    const spokeEnd = tip * SPOKE_END_FRAC;
-    const x1 = ux * spokeEnd,
-      z1 = uz * spokeEnd;
-    const nx = -uz * CORR_HALF,
-      nz = ux * CORR_HALF;
-    SPOKES_CACHE.push([
-      [x0 + nx, z0 + nz],
-      [x1 + nx, z1 + nz],
-      [x1 - nx, z1 - nz],
-      [x0 - nx, z0 - nz],
-    ]);
-  });
-}
-
+// ===================================================================
+// KODE MINIMAP CANDI SIWA — SELASAR 4 MATA ANGIN 100% IDENTIK & SIMETRIS
+// ===================================================================
 function drawMinimap() {
-  mmCtx.fillStyle = MM_BG;
-  mmCtx.fillRect(0, 0, MM, MM);
+  const mmCanvas = document.getElementById("mm");
+  if (!mmCanvas) return;
+  const mmCtx = mmCanvas.getContext("2d");
+  const width = mmCanvas.width;
+  const height = mmCanvas.height;
 
-  const sc = MM / (VIEW_HALF * 2),
-    cx = MM / 2,
-    cy = MM / 2;
-  // Peta statis: posisi dunia (0,0) SELALU jatuh di tengah kotak (cx, cy).
-  const toMM = (wx, wz) => ({ x: cx + wx * sc, y: cy + wz * sc });
+  // 1. Clear background (Kertas sketsa cream)
+  mmCtx.fillStyle = "#ebe8db";
+  mmCtx.fillRect(0, 0, width, height);
 
-  // Denah candi — bingkai luar (gelap) + isian dalam (terang), berlapis
-  function drawPlanLayer(pts, fillColor, lineW = 1.3) {
-    mmCtx.beginPath();
-    pts.forEach(([wx, wz], i) => {
-      const p = toMM(wx, wz);
-      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
-    });
-    mmCtx.closePath();
-    mmCtx.fillStyle = fillColor;
-    mmCtx.fill();
-    mmCtx.strokeStyle = MM_OUTLINE;
-    mmCtx.lineWidth = lineW;
-    mmCtx.stroke();
-  }
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const gridStep = 12; // Skala grid
 
-  buildStatueLayout();
+  const toPx = (gx, gy) => ({
+    x: centerX + gx * gridStep,
+    y: centerY + gy * gridStep,
+  });
 
-  // 1) Denah candi — bentuk luar akurat hasil lacak dari gambar referensi
-  drawPlanLayer(PLAN_PTS, MM_PLAN);
+  // 3. OUTLINE CANDI (GARIS WARNA MERAH)
+  const redPoints = [
+    [-1, -10], [1, -10],
+    [1, -9], [2, -9], [2, -8], [4, -8], [4, -6], [6, -6], [6, -4], [8, -4], [8, -3], [9, -3], [9, -1],
+    [11, -1], [11, 1], [9, 1],
+    [9, 3], [8, 3], [8, 4], [6, 4], [6, 6], [4, 6], [4, 8], [2, 8], [2, 9], [1, 9], [1, 10],
+    [-1, 10],
+    [-1, 9], [-2, 9], [-2, 8], [-4, 8], [-4, 6], [-6, 6], [-6, 4], [-8, 4], [-8, 3], [-9, 3], [-9, 1],
+    [-11, 1], [-11, -1], [-9, -1],
+    [-9, -3], [-8, -3], [-8, -4], [-6, -4], [-6, -6], [-4, -6], [-4, -8], [-2, -8], [-2, -9], [-1, -9], [-1, -10]
+  ];
 
-  // 2) Ring galeri (koridor keliling, biru) — digambar sebagai "bingkai foto":
-  //    path luar + path dalam dengan arah gambar BERLAWANAN, di-fill pakai
-  //    aturan evenodd supaya bagian tengahnya berlubang (jadi bentuk ring).
   mmCtx.beginPath();
-  RING_OUTER_PTS.forEach(([wx, wz], i) => {
-    const p = toMM(wx, wz);
-    i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
+  redPoints.forEach(([gx, gy], i) => {
+    const pt = toPx(gx, gy);
+    if (i === 0) mmCtx.moveTo(pt.x, pt.y);
+    else mmCtx.lineTo(pt.x, pt.y);
   });
   mmCtx.closePath();
-  // inner path digambar mundur (reverse) — bikin winding-nya berlawanan,
-  // supaya "evenodd" benar-benar melubangi bagian dalam.
-  [...RING_INNER_PTS]
-    .reverse()
-    .forEach(([wx, wz], i) => {
-      const p = toMM(wx, wz);
-      i === 0 ? mmCtx.moveTo(p.x, p.y) : mmCtx.lineTo(p.x, p.y);
-    });
-  mmCtx.closePath();
-  mmCtx.fillStyle = MM_CORRIDOR;
-  mmCtx.fill("evenodd");
-  mmCtx.strokeStyle = MM_OUTLINE;
-  mmCtx.lineWidth = 1;
+  mmCtx.strokeStyle = "#2a2119";
+  mmCtx.lineWidth = 2.5;
   mmCtx.stroke();
 
-  // 3) Spoke (biru) dari ruang tengah ke ring, + ruang tengah itu sendiri
-  //    (bagian dari jaringan koridor, sama seperti di sketsa)
-  SPOKES_CACHE.forEach((pts) => drawPlanLayer(pts, MM_CORRIDOR, 1));
-  drawPlanLayer(_centerSq, MM_CORRIDOR, 1);
+  // 4. OUTLINE KORIDOR & SELASAR
+  mmCtx.strokeStyle = "#ffda3d";
+  mmCtx.lineWidth = 1.8;
 
-  // 4) Ruang arca (merah), digambar di atas koridor
-  ROOMS_CACHE.forEach((pts) => drawPlanLayer(pts, MM_ROOM, 1));
+  // A. 4 SELASAR UTAMA (Dengan celah/gap di persimpangan koridor)
+  const hallwayPaths = [
+    // Selasar Timur (Gap antara x=6 dan x=8)
+    [[2, -0.5], [6, -0.5]],
+    [[8, -0.5], [10, -0.5]],
+    [[2, 0.5], [6, 0.5]],
+    [[8, 0.5], [10, 0.5]],
 
-  // Titik arca — posisi asli dari POIS, tanpa nama/label
-  mmCtx.fillStyle = MM_DOT;
-  DOTS_CACHE.forEach(([wx, wz]) => {
-    const dot = toMM(wx, wz);
+    // Selasar Barat (Gap antara x=-6 dan x=-8)
+    [[-5.5, -0.5], [-6, -0.5]],
+    [[-8, -0.5], [-10, -0.5]],
+    [[-5.5, 0.5], [-6, 0.5]],
+    [[-8, 0.5], [-10, 0.5]],
+
+    // Selasar Utara (Gap antara y=-6 dan y=-8)
+    [[-0.5, -5.5], [-0.5, -6]],
+    [[-0.5, -8], [-0.5, -9]],
+    [[0.5, -5.5], [0.5, -6]],
+    [[0.5, -8], [0.5, -9]],
+
+    // Selasar Selatan (Gap antara y=6 dan y=8)
+    [[-0.5, 5.5], [-0.5, 6]],
+    [[-0.5, 8], [-0.5, 9]],
+    [[0.5, 5.5], [0.5, 6]],
+    [[0.5, 8], [0.5, 9]]
+  ];
+
+  hallwayPaths.forEach((path) => {
     mmCtx.beginPath();
-    mmCtx.arc(dot.x, dot.y, 2.8, 0, Math.PI * 2);
-    mmCtx.fill();
+    path.forEach(([gx, gy], i) => {
+      const pt = toPx(gx, gy);
+      if (i === 0) mmCtx.moveTo(pt.x, pt.y);
+      else mmCtx.lineTo(pt.x, pt.y);
+    });
+    mmCtx.stroke();
   });
 
-  // Penanda posisi pemain — INI yang bergerak, bukan petanya
-  if (isSV) {
-    let mx = P.pos.x * sc,
-      mz = P.pos.z * sc;
-    const dist = Math.hypot(mx, mz);
-    if (dist > MARKER_MAX_R) {
-      const k = MARKER_MAX_R / dist; // tempel di tepi kalau pemain jalan terlalu jauh
-      mx *= k;
-      mz *= k;
-    }
-    mmCtx.save();
-    mmCtx.translate(cx + mx, cy + mz);
-    mmCtx.rotate(-P.yaw);
-    mmCtx.fillStyle = MM_MARKER;
-    mmCtx.beginPath();
-    mmCtx.moveTo(0, -8);
-    mmCtx.lineTo(5, 5);
-    mmCtx.lineTo(-5, 5);
-    mmCtx.closePath();
-    mmCtx.fill();
-    mmCtx.restore();
-  } else {
-    mmCtx.fillStyle = MM_MARKER;
-    mmCtx.beginPath();
-    mmCtx.arc(cx, cy, 5, 0, Math.PI * 2);
-    mmCtx.fill();
-  }
+  // B. DINDING KORIDOR 4 KUADRAN (Ujung dinding terbuka pada lorong selasar)
+  // Kuadran NE (Utara-Timur)
+  const neOuter = [[0.5, -8], [1, -8], [1, -7], [3, -7], [3, -5], [5, -5], [5, -3], [7, -3], [7, -2], [8, -2], [8, -0.5]];
+  const neInner = [[0.5, -6], [1, -6], [2, -6], [2, -4], [4, -4], [4, -2], [6, -2], [6, -0.5]];
 
-  mmCtx.strokeStyle = MM_OUTLINE;
-  mmCtx.lineWidth = 2;
-  mmCtx.strokeRect(1, 1, MM - 2, MM - 2);
+  // Kuadran SE (Selatan-Timur)
+  const seOuter = [[8, 0.5], [8, 2], [7, 2], [7, 3], [5, 3], [5, 5], [3, 5], [3, 7], [1, 7], [1, 8], [0.5, 8]];
+  const seInner = [[6, 0.5], [6, 2], [4, 2], [4, 4], [2, 4], [2, 6], [1, 6], [0.5, 6]];
+
+  // Kuadran SW (Selatan-Barat)
+  const swOuter = [[-0.5, 8], [-1, 8], [-1, 7], [-3, 7], [-3, 5], [-5, 5], [-5, 3], [-7, 3], [-7, 2], [-8, 2], [-8, 0.5]];
+  const swInner = [[-0.5, 6], [-1, 6], [-2, 6], [-2, 4], [-4, 4], [-4, 2], [-6, 2], [-6, 0.5]];
+
+  // Kuadran NW (Utara-Barat)
+  const nwOuter = [[-8, -0.5], [-8, -2], [-7, -2], [-7, -3], [-5, -3], [-5, -5], [-3, -5], [-3, -7], [-1, -7], [-1, -8], [-0.5, -8]];
+  const nwInner = [[-6, -0.5], [-6, -2], [-4, -2], [-4, -4], [-2, -4], [-2, -6], [-1, -6], [-0.5, -6]];
+
+  const corridorQuadrants = [neOuter, neInner, seOuter, seInner, swOuter, swInner, nwOuter, nwInner];
+
+  corridorQuadrants.forEach((path) => {
+    mmCtx.beginPath();
+    path.forEach(([gx, gy], i) => {
+      const pt = toPx(gx, gy);
+      if (i === 0) mmCtx.moveTo(pt.x, pt.y);
+      else mmCtx.lineTo(pt.x, pt.y);
+    });
+    mmCtx.stroke();
+  });
+
+  // 5. OUTLINE RUANG ARCA (GARIS WARNA BIRU TUA)
+  mmCtx.strokeStyle = "#3d6b65";
+  mmCtx.lineWidth = 2.5;
+
+  // Ruang Arca Utama / Tengah (Siwa) - Pintu ke Timur
+  const c1 = toPx(-2, -2), c2 = toPx(2, -2), c3 = toPx(2, 2), c4 = toPx(-2, 2);
+  const cEastTop = toPx(2, -0.5), cEastBtm = toPx(2, 0.5);
+  mmCtx.beginPath();
+  mmCtx.moveTo(cEastTop.x, cEastTop.y);
+  mmCtx.lineTo(c2.x, c2.y); mmCtx.lineTo(c1.x, c1.y); mmCtx.lineTo(c4.x, c4.y); mmCtx.lineTo(c3.x, c3.y); mmCtx.lineTo(cEastBtm.x, cEastBtm.y);
+  mmCtx.stroke();
+
+  // Ruang Arca Utara (Durga) - Pintu ke Utara
+  const nTopLeft = toPx(-1.5, -5.5), nDoorLeft = toPx(-0.5, -5.5), nDoorRight = toPx(0.5, -5.5), nTopRight = toPx(1.5, -5.5), nBtmRight = toPx(1.5, -2.5), nBtmLeft = toPx(-1.5, -2.5);
+  mmCtx.beginPath();
+  mmCtx.moveTo(nDoorLeft.x, nDoorLeft.y); mmCtx.lineTo(nTopLeft.x, nTopLeft.y); mmCtx.lineTo(nBtmLeft.x, nBtmLeft.y); mmCtx.lineTo(nBtmRight.x, nBtmRight.y); mmCtx.lineTo(nTopRight.x, nTopRight.y); mmCtx.lineTo(nDoorRight.x, nDoorRight.y);
+  mmCtx.stroke();
+
+  // Ruang Arca Selatan (Agastya) - Pintu ke Selatan
+  const sBtmLeft = toPx(-1.5, 5.5), sDoorLeft = toPx(-0.5, 5.5), sDoorRight = toPx(0.5, 5.5), sBtmRight = toPx(1.5, 5.5), sTopRight = toPx(1.5, 2.5), sTopLeft = toPx(-1.5, 2.5);
+  mmCtx.beginPath();
+  mmCtx.moveTo(sDoorLeft.x, sDoorLeft.y); mmCtx.lineTo(sBtmLeft.x, sBtmLeft.y); mmCtx.lineTo(sTopLeft.x, sTopLeft.y); mmCtx.lineTo(sTopRight.x, sTopRight.y); mmCtx.lineTo(sBtmRight.x, sBtmRight.y); mmCtx.lineTo(sDoorRight.x, sDoorRight.y);
+  mmCtx.stroke();
+
+  // Ruang Arca Barat (Ganesha) - Pintu ke Barat
+  const wLeftTop = toPx(-5.5, -1.5), wDoorTop = toPx(-5.5, -0.5), wDoorBtm = toPx(-5.5, 0.5), wLeftBtm = toPx(-5.5, 1.5), wRightBtm = toPx(-2.5, 1.5), wRightTop = toPx(-2.5, -1.5);
+  mmCtx.beginPath();
+  mmCtx.moveTo(wDoorTop.x, wDoorTop.y); mmCtx.lineTo(wLeftTop.x, wLeftTop.y); mmCtx.lineTo(wRightTop.x, wRightTop.y); mmCtx.lineTo(wRightBtm.x, wRightBtm.y); mmCtx.lineTo(wLeftBtm.x, wLeftBtm.y); mmCtx.lineTo(wDoorBtm.x, wDoorBtm.y);
+  mmCtx.stroke();
+
+// ===================================================================
+// KODE PLAYER MARKER (Tambahkan di bagian paling bawah fungsi drawMinimap)
+// ===================================================================
+
+// Kalibrasi: rasio grid-minimap vs unit dunia (P.pos). Sesuaikan angka
+// ini kalau marker meleset dari lorong/gerbang — cek dengan jalan ke
+// gerbang timur (tombol 1) lalu bandingkan posisi marker vs gerbang di gambar.
+const PLAYER_MARKER_SCALE = 4;
+const playerX = P.pos.x * PLAYER_MARKER_SCALE;
+const playerY = P.pos.z * PLAYER_MARKER_SCALE;
+
+const playerPt = toPx(playerX, playerY);
+
+mmCtx.save();
+mmCtx.translate(playerPt.x, playerPt.y);
+mmCtx.rotate(-P.yaw);
+
+// 1. Panah Chevron Arah Player (Warna Merah)
+mmCtx.beginPath();
+mmCtx.moveTo(0, -10);  // ujung panah (depan)
+mmCtx.lineTo(8, 6);    // sudut kanan belakang
+mmCtx.lineTo(0, 2);    // lekukan tengah — ini yang bikin bentuk chevron/panah
+mmCtx.lineTo(-8, 6);   // sudut kiri belakang
+mmCtx.closePath();
+
+mmCtx.fillStyle = "#e53935"; // merah
+mmCtx.fill();
+
+mmCtx.restore();
 }
 
 // ── LOAD MODEL ───────────────────────────────────────────────────
